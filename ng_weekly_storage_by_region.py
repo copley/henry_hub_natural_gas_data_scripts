@@ -39,14 +39,30 @@ import os
 import requests
 import json
 from collections import defaultdict
+from dotenv import load_dotenv
+
+def sum_weekly_scores(data_list):
+    """
+    Sums all BCF values from a list of tuples (description, value).
+    """
+    total = 0
+    for description, value in data_list:
+        try:
+            total += float(value)
+        except ValueError:
+            print(f"Warning: Unable to convert {value} to a float for {description}. Skipping...")
+    return total
 
 def main():
+    # Load environment variables from the .env file
+    load_dotenv()
+
     # Read token from environment
-    EIA_TOKEN = os.environ.get("EIA_TOKEN")
-    if not EIA_TOKEN:
-        print("ERROR: EIA_TOKEN environment variable not set.")
+    EIA_API_KEY = os.getenv('EIA_API_KEY')
+    if not EIA_API_KEY:
+        print("ERROR: EIA_API_KEY environment variable not set.")
         print("Please set it with:")
-        print('  export EIA_TOKEN="YOUR_API_KEY_HERE"')
+        print('  export EIA_API_KEY="YOUR_API_KEY_HERE"')
         return
 
     # EIA API base URL
@@ -56,12 +72,12 @@ def main():
     params = {
         "frequency": "weekly",
         "data[0]": "value",
-        "start": "2025-03-01",
+        "start": "2024-12-01",
         "sort[0][column]": "period",
         "sort[0][direction]": "desc",
         "offset": 0,
         "length": 5000,
-        "api_key": EIA_TOKEN
+        "api_key": EIA_API_KEY
     }
 
     headers = {
@@ -69,7 +85,7 @@ def main():
             "frequency": "weekly",
             "data": ["value"],
             "facets": {},
-            "start": "2025-03-01",
+            "start": "2024-12-01",
             "end": None,
             "sort": [
                 {"column": "period", "direction": "desc"}
@@ -98,8 +114,11 @@ def main():
         # Print sorted output
         for period in sorted(grouped.keys(), reverse=True):
             print(f"\n📅 {period}")
-            for description, value in sorted(grouped[period], key=lambda x: x[0]):
+            weekly_data = sorted(grouped[period], key=lambda x: x[0])
+            for description, value in weekly_data:
                 print(f"  - {description}: {value} BCF")
+            total = sum_weekly_scores(weekly_data)
+            print(f"  Total: {total} BCF")
 
     except requests.exceptions.RequestException as e:
         print("Request failed:")
@@ -107,4 +126,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
