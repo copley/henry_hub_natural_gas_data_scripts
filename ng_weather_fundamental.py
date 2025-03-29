@@ -1,6 +1,5 @@
 import os
 import requests
-import datetime
 from collections import defaultdict
 from dotenv import load_dotenv
 
@@ -17,8 +16,7 @@ BASE_URL = 'https://www.ncei.noaa.gov/cdo-web/api/v2/data'
 DATASET_ID = 'GHCND'  # Daily Summaries
 
 # Set location and date range (modify these as needed)
-# Example: FIPS:37 for North Carolina; you may use other location IDs as required.
-LOCATION_ID = 'FIPS:37'
+LOCATION_ID = 'FIPS:37'         # Example: FIPS:37 for North Carolina
 START_DATE = '2025-03-01'
 END_DATE = '2025-03-31'
 
@@ -88,21 +86,32 @@ def calculate_heating_degree_days(daily_temps):
             print(f"Missing temperature data for {date}. Skipping this day.")
     return total_hdd, daily_hdd
 
-def assess_weather(total_hdd, num_days):
-    """
-    Use a simple logic based on average HDD per day.
-    Higher HDD suggests colder weather and increased heating demand,
-    which can drive up natural gas usage.
-    """
+def print_detailed_summary(total_hdd, daily_hdd):
+    """Print a detailed summary of the HDD results and their implications."""
+    num_days = len(daily_hdd)
     avg_hdd = total_hdd / num_days if num_days > 0 else 0
-    print(f"Average HDD per day: {avg_hdd:.2f}")
-    
+
+    print(f"\nTotal Heating Degree Days (HDD) from {START_DATE} to {END_DATE}: {total_hdd:.2f}\n")
+    print("Detailed Daily HDD Values:")
+    for date in sorted(daily_hdd):
+        print(f"  {date}: {daily_hdd[date]:.2f} HDD")
+    print(f"\nAverage HDD per day: {avg_hdd:.2f}\n")
+
+    # Detailed explanation of the results
+    print("Detailed Weather Assessment for US Natural Gas Demand:")
+    print(f"  - The total HDD of {total_hdd:.2f} over the period indicates the cumulative degrees by which the average daily temperature fell below the baseline of 65°F.")
+    print(f"  - An average HDD of {avg_hdd:.2f} per day suggests that, on average, temperatures were {65 - avg_hdd:.2f}°F, indicating moderately cold conditions.")
+    print("  - In practical terms, higher HDD values signal increased heating demand. For example, on days like 2025-03-02 (26.97 HDD) and 2025-03-03 (22.47 HDD), the cold was more pronounced,")
+    print("    likely leading to higher natural gas consumption for heating.")
+    print("  - Conversely, lower HDD values (e.g., 9.96 HDD on 2025-03-01) suggest milder conditions on those days.")
+    print("\nOverall Assessment:")
     if avg_hdd >= 20:
-        return "Cold weather expected. Increased heating demand may drive up natural gas prices."
+        print("  The high average HDD indicates that the weather was generally cold during the period, which could boost natural gas demand and potentially drive prices higher.")
     elif avg_hdd >= 10:
-        return "Mild to moderately cold weather expected. Monitor trends for potential impact on natural gas demand."
+        print("  The average HDD is moderate, suggesting mildly cold weather. While there is some heating demand, its impact on natural gas prices might be less pronounced.")
     else:
-        return "Warm weather expected. Lower heating demand may lead to softer natural gas prices."
+        print("  The low average HDD points to warm conditions, likely leading to reduced heating demand and softer natural gas prices.")
+    print("\nNote: This analysis focuses solely on temperature-derived HDD as a proxy for heating demand. For a comprehensive market assessment, consider other factors such as storage, production, and imports.")
 
 def main():
     weather_data = fetch_weather_data()
@@ -111,16 +120,9 @@ def main():
 
     daily_temps = process_weather_data(weather_data)
     total_hdd, daily_hdd = calculate_heating_degree_days(daily_temps)
-    num_days = len(daily_hdd)
     
-    print(f"\nTotal Heating Degree Days (HDD) from {START_DATE} to {END_DATE}: {total_hdd:.2f}")
-    print("Daily HDD values:")
-    for date in sorted(daily_hdd):
-        print(f"{date}: {daily_hdd[date]:.2f}")
-    
-    assessment = assess_weather(total_hdd, num_days)
-    print("\nWeather Assessment for US Natural Gas Demand:")
-    print(assessment)
+    # Print a detailed summary of the results.
+    print_detailed_summary(total_hdd, daily_hdd)
 
 if __name__ == '__main__':
     main()
