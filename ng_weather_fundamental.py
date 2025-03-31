@@ -95,8 +95,8 @@ def calculate_market_move(avg_hdd, baseline=15, sensitivity=0.2):
     - baseline: a 'neutral' average HDD value (default 15).
     - sensitivity: estimated cents per MMBtu movement per HDD point deviation (default 0.2).
     
-    For example, if the average HDD is 20.85, then the difference is 5.85, which
-    translates to an estimated move of 5.85 * 0.2 ≈ 1.17 cents per MMBtu.
+    For example, if the average HDD is 20.85, then the difference is 5.85,
+    which translates to an estimated move of 5.85 * 0.2 ≈ 1.17 cents per MMBtu.
     """
     delta_hdd = avg_hdd - baseline
     move = delta_hdd * sensitivity
@@ -118,7 +118,7 @@ def print_temperature_details(daily_temps):
 
 def print_interpretation_text(market_move):
     """
-    Print the interpretation text with examples.
+    Print the interpretation text with revised examples.
     This text explains what a market move of +X cents means on an MHNG chart.
     """
     print("""
@@ -135,7 +135,6 @@ If the Current Price Is $4.00 per MMBtu
   Adding +1.17 cents brings it to 401.17 cents, or $4.0117.
   That’s a small absolute move, but it indicates mild upward pressure 
   due to colder-than-expected weather.
-  At such a high price level, +1.17 cents is a very small fraction of the total (0.0585%).
 
 Why Are We Talking About “Cents”?
   Futures markets often reference natural gas prices in dollars per MMBtu (e.g., $3.35).
@@ -157,30 +156,46 @@ we see a 0.2-cent move. In reality, the market can be influenced by
 many other variables, so always treat this as one piece of a larger puzzle.
 """)
 
+def print_weather_implication_rules():
+    """Print additional weather implication rules for short-term and medium-term outlooks."""
+    print("\n2. Weather")
+    print("Short-Term Implication Rules:")
+    print("  - Sudden Temperature Swings: Abrupt increases in heating or cooling degree days can drive immediate changes in demand,")
+    print("    pushing prices up if supply doesn’t react quickly.")
+    print("  - Localized vs. Widespread Weather Events: A cold snap or heatwave concentrated in major demand centers (e.g., Northeast)")
+    print("    can boost regional gas usage and spot prices.")
+    print("\nMedium-Term Implication Rules:")
+    print("  - Seasonal Forecasts: Extended forecasts of colder-than-normal or hotter-than-normal weather patterns raise the")
+    print("    expectation of sustained demand, putting upward pressure on future or forward prices.")
+    print("  - Climate Anomalies (e.g., El Niño/La Niña): These can alter weather patterns over multiple months. Analysts")
+    print("    anticipate changes in gas consumption trends, influencing hedging and investment decisions.")
+
 def print_detailed_summary(total_hdd, daily_hdd, daily_temps):
     """Print a comprehensive summary including HDD values, temperature details, weather assessment, market impact, and interpretation."""
     num_days = len(daily_hdd)
     avg_hdd = total_hdd / num_days if num_days > 0 else 0
     market_move = calculate_market_move(avg_hdd)
     
-    # Print detailed HDD values
+    # Calculate the average temperature deficit relative to the 65°F baseline
+    # For example, if avg_hdd = 20.85 then the average daily temperature is 65 - 20.85 = 44.15°F.
+    temp_deficit_f = 65 - avg_hdd
+    temp_deficit_c = (temp_deficit_f - 32) * 5/9
+
     print("\nDetailed Daily HDD Values:")
     for date in sorted(daily_hdd):
         print(f"  {date}: {daily_hdd[date]:.2f} HDD")
-    print(f"\nAverage HDD per day: {avg_hdd:.2f}")
+    print(f"\nAverage HDD per day: {avg_hdd:.2f}\n")
     
-    # Print detailed temperature readings
-    print("\nDaily Temperature Readings:")
+    print("Daily Temperature Readings:")
     print_temperature_details(daily_temps)
     
-    # Detailed weather assessment
     print("\nDetailed Weather Assessment for US Natural Gas Demand:")
-    print(f"  - The total HDD of {total_hdd:.2f} represents the cumulative shortfall in temperature below 65°F over the period.")
-    print(f"  - An average HDD of {avg_hdd:.2f} per day indicates that, on average, temperatures were about {65 - avg_hdd:.2f}°F (in terms of the deficit) relative to the 65°F baseline.")
+    print(f"  - The total HDD of {total_hdd:.2f} represents the cumulative shortfall in temperature below 65°F (18.33°C) over the period.")
+    print(f"  - An average HDD of {avg_hdd:.2f} per day indicates that, on average, temperatures were about {temp_deficit_f:.2f}°F ({temp_deficit_c:.2f}°C)")
+    print("    relative to the 65°F (18.33°C) baseline.")
     print("  - Higher HDD values (for example, above 20) indicate significantly colder days, likely leading to higher natural gas consumption for heating.")
     print("  - Lower HDD values suggest milder conditions on those days.")
     
-    # Market impact metric
     print("\nMarket Impact Metric:")
     print("  - Our heuristic model uses a baseline of 15 HDD, where conditions are considered neutral.")
     print("  - For each HDD point above (or below) this baseline, we assume an approximate impact of 0.2 cents per MMBtu on natural gas prices.")
@@ -189,8 +204,9 @@ def print_detailed_summary(total_hdd, daily_hdd, daily_temps):
     else:
         print(f"  - With an average HDD of {avg_hdd:.2f}, this equates to an estimated downward move of {market_move:.2f} cents per MMBtu.")
     
-    # Print the interpretation text
     print_interpretation_text(market_move)
+    
+    print_weather_implication_rules()
 
 def main():
     weather_data = fetch_weather_data()

@@ -352,6 +352,38 @@ def main():
     print(f"Trend Direction: {trend}")
     print("======================================================\n")
 
+def print_eia_cheat_sheet():
+    print("""
+📝 EIA Weekly Natural Gas Storage Report - Trader Interpretation Cheat Sheet
+
+This table is a quick-glance cheat sheet traders use when interpreting the 
+U.S. EIA Weekly Natural Gas Storage Report — a key driver for price moves in 
+natural gas (NG) futures. Here's a breakdown of each variable with context 
+to help you apply it in real-time trading:
+
+Variable                         | Bullish (↑ Prices)                                   | Bearish (↓ Prices)
+--------------------------------|------------------------------------------------------|----------------------------------------------------
+Weekly Storage Change           | ➤ Larger withdrawal in winter (more gas used)        | ➤ Smaller withdrawal in winter
+                                | ➤ Smaller injection in summer (less supply added)    | ➤ Larger injection in summer
+
+Deviation from Analyst Estimates| ➤ Less gas stored than consensus (tight supply)      | ➤ More gas stored than expected (ample supply)
+
+Inventory vs. 5-year Average    | ➤ Below average indicates tightness                  | ➤ Above average signals oversupply
+
+Inventory vs. Last Year         | ➤ Lower than last year means tighter YoY balance     | ➤ Higher than last year implies growing supply
+
+Regional Storage Dynamics       | ➤ Deficits in high-consumption regions (e.g. East, Midwest)
+                                | ➤ Surpluses or heavy injections in key regions
+
+💡 How to Use This as a Trader:
+- Pre-report: Watch analyst consensus numbers. A miss to the upside or downside can trigger strong moves.
+- Post-report (Thursdays, 10:30am ET): React quickly to the deviation and tone of regional data.
+- Combine with: Weather forecasts, LNG exports, production trends, and futures curve structure 
+  (contango/backwardation).
+""")
+
+# Call the function to display the cheat sheet
+print_eia_cheat_sheet()
 
 if __name__ == "__main__":
     main()
