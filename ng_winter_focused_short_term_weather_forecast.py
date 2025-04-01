@@ -14,9 +14,6 @@ from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
 
-# Practical Scheduling Suggestions (Refined & Summarized)
-# ... (Unchanged)...
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -40,10 +37,8 @@ CITY_INFO = {
     "Detroit":       {"station_id": "GHCND:USW00094847", "population": 632464},
     "Denver":        {"station_id": "GHCND:USW00003017", "population": 715522},
     "Salt Lake City":{"station_id": "GHCND:USW00024127", "population": 200133},
-    # Removed warm “South Central” & “Pacific” from the dictionary
 }
 
-# We no longer define "South Central" & "Pacific" in REGIONS
 REGIONS = {
     "Northeast": ["New York City", "Boston"],
     "Midwest":   ["Chicago", "Detroit"],
@@ -52,8 +47,10 @@ REGIONS = {
 
 HDD_BASE_TEMP = 65
 FORECAST_DAYS = 7
-HISTORICAL_YEARS = 2  # how many years of data to fetch from NOAA
 
+# --------------------------------
+# 2. Safe request helper for NOAA
+# --------------------------------
 def safe_request(
     url: str,
     headers=None,
@@ -79,60 +76,33 @@ def safe_request(
     logging.error(f"All {max_retries} retries failed for {url}.")
     return None
 
-def fetch_forecast_temperatures(lat: float, lon: float, days: int = FORECAST_DAYS):
-    endpoint = "https://api.open-meteo.com/v1/forecast"
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "daily": ["temperature_2m_max", "temperature_2m_min"],
-        "forecast_days": days,
-        "temperature_unit": "fahrenheit",
-        "timezone": "auto",
-    }
-    response = safe_request(endpoint, params=params, timeout=10, max_retries=3)
-    if response is None:
-        logging.error(f"Failed forecast fetch lat={lat}, lon={lon}. Returning empty DataFrame.")
-        return pd.DataFrame(columns=["date", "temp_min", "temp_max"])
+# --------------------------------------------
+# 3. Fetch NOAA Daily Data in the given window
+# --------------------------------------------
+def fetch_noaa_historical_daily_data(regions_dict, start_date, end_date, noaa_token=NOAA_API_TOKEN):
+    """
+    Fetch daily NOAA data (TMIN/TMAX) from start_date to end_date
+    for each city in regions_dict. Return a DataFrame with columns:
+    [date, region, HDD] (weighted by population).
+    """
+    if not start_date or not end_date:
+        raise ValueError("Must supply valid start_date and end_date")
 
-    data = response.json()
-    if "daily" not in data or "time" not in data["daily"]:
-        logging.error("Forecast API returned invalid data structure.")
-        return pd.DataFrame(columns=["date", "temp_min", "temp_max"])
+    logging.info(f"Fetching NOAA daily data from {start_date} to {end_date}")
 
-    dates = data["daily"]["time"]
-    temp_mins = data["daily"].get("temperature_2m_min", [])
-    temp_maxs = data["daily"].get("temperature_2m_max", [])
-    if not dates or not temp_mins or not temp_maxs:
-        logging.error("Forecast API returned empty lists for time or temperatures.")
-        return pd.DataFrame(columns=["date", "temp_min", "temp_max"])
-
-    df = pd.DataFrame({
-        "date": pd.to_datetime(dates),
-        "temp_min": temp_mins,
-        "temp_max": temp_maxs
-    })
-    return df
-
-def fetch_noaa_historical_data(regions_dict, years=1, noaa_token=NOAA_API_TOKEN):
-    end_date = (datetime.now().date() - timedelta(days=1))
-    start_date = (end_date - timedelta(days=365 * years))
-
-    city_avg_hdds = {}
-    max_failures = 3
-    fail_count = 0
+    rows = []
 
     for region_name, cities in regions_dict.items():
         for city in cities:
             station_id = CITY_INFO[city]["station_id"]
             population = CITY_INFO[city]["population"]
-            logging.info(f"Fetching NOAA historical data for {city} ({station_id}) from {start_date} to {end_date} ...")
+            logging.info(f"[DAILY] NOAA data for {city} from {start_date} to {end_date} ...")
 
             current_start = start_date
             frames = []
+            # Chunk the range in (e.g.) 180- or 365-day increments:
             while current_start < end_date:
-                chunk_end = current_start + timedelta(days=180)
-                if chunk_end > end_date:
-                    chunk_end = end_date
+                chunk_end = min(current_start + timedelta(days=180), end_date)
 
                 base_params = {
                     "datasetid": "GHCND",
@@ -148,7 +118,6 @@ def fetch_noaa_historical_data(regions_dict, years=1, noaa_token=NOAA_API_TOKEN)
 
                 offset = 1
                 chunk_frames = []
-
                 while True:
                     params_list = list(base_params.items()) + [("offset", offset)]
                     url = "https://www.ncdc.noaa.gov/cdo-web/api/v2/data"
@@ -161,130 +130,6 @@ def fetch_noaa_historical_data(regions_dict, years=1, noaa_token=NOAA_API_TOKEN)
 
                     if r.status_code != 200:
                         logging.error(f"NOAA API request failed status {r.status_code} => skipping chunk.")
-                        break
-
-                    resp_json = r.json()
-                    if "results" not in resp_json or not resp_json["results"]:
-                        break
-
-                    results = resp_json["results"]
-                    chunk_df = pd.DataFrame(results)
-                    if chunk_df.empty:
-                        break
-
-                    chunk_df["date"] = pd.to_datetime(chunk_df["date"]).dt.date
-                    pivoted = chunk_df.pivot_table(
-                        index="date",
-                        columns="datatype",
-                        values="value",
-                        aggfunc="mean"
-                    ).reset_index()
-                    chunk_frames.append(pivoted)
-
-                    meta = resp_json.get("metadata", {})
-                    resultset = meta.get("resultset", {})
-                    total_count = resultset.get("count", 0)
-                    limit = resultset.get("limit", 1000)
-                    current_offset = resultset.get("offset", offset)
-
-                    next_offset = current_offset + limit
-                    if next_offset > total_count:
-                        break
-                    else:
-                        offset = next_offset
-
-                if chunk_frames:
-                    big_chunk_df = pd.concat(chunk_frames, ignore_index=True)
-                    frames.append(big_chunk_df)
-                else:
-                    logging.info(f"No data returned for {city} in chunk {current_start} - {chunk_end}")
-
-                current_start = chunk_end
-
-            if frames:
-                city_data = pd.concat(frames, ignore_index=True)
-            else:
-                logging.warning(f"No historical data returned for {city}. Setting avg_hdd=0.")
-                city_avg_hdds[city] = {"avg_hdd": 0, "population": population}
-                fail_count += 1
-                if fail_count >= max_failures:
-                    logging.critical("Too many failures => Aborting.")
-                    return {}
-                continue
-
-            if "TMIN" not in city_data.columns or "TMAX" not in city_data.columns:
-                logging.warning(f"Missing TMIN/TMAX => city HDD=0 for {city}.")
-                city_avg_hdds[city] = {"avg_hdd": 0, "population": population}
-                continue
-
-            city_data["TAVG"] = (city_data["TMAX"] + city_data["TMIN"]) / 2.0
-            city_data["HDD"] = np.maximum(0, 65 - city_data["TAVG"])
-            avg_hdd = city_data["HDD"].mean()
-            city_avg_hdds[city] = {"avg_hdd": avg_hdd, "population": population}
-
-    region_averages = {}
-    for region_name, cities in regions_dict.items():
-        total_pop = sum(city_avg_hdds[c]["population"] for c in cities)
-        if total_pop == 0:
-            region_averages[region_name] = 0
-            continue
-
-        weighted_sum = 0
-        for c in cities:
-            pop = city_avg_hdds[c]["population"]
-            avg_hdd = city_avg_hdds[c]["avg_hdd"]
-            weight = pop / total_pop
-            weighted_sum += (avg_hdd * weight)
-
-        region_averages[region_name] = weighted_sum
-
-    return region_averages
-
-def fetch_noaa_historical_daily_data(regions_dict, years=1, noaa_token=NOAA_API_TOKEN):
-    end_date = (datetime.now().date() - timedelta(days=1))
-    start_date = (end_date - timedelta(days=728 * years))
-    rows = []
-
-    for region_name, cities in regions_dict.items():
-        for city in cities:
-            station_id = CITY_INFO[city]["station_id"]
-            population = CITY_INFO[city]["population"]
-            logging.info(f"[DAILY] NOAA data for {city} from {start_date} to {end_date} ...")
-
-            current_start = start_date
-            frames = []
-            while current_start < end_date:
-                chunk_end = current_start + timedelta(days=365)
-                if chunk_end > end_date:
-                    chunk_end = end_date
-
-                base_params = {
-                    "datasetid": "GHCND",
-                    "stationid": station_id,
-                    "startdate": str(current_start),
-                    "enddate": str(chunk_end),
-                    "units": "standard",
-                    "datatypeid": ["TMIN", "TMAX"],
-                    "sortfield": "date",
-                    "sortorder": "asc",
-                    "limit": 1000,
-                }
-
-                offset = 1
-                chunk_frames = []
-
-                while True:
-                    params_list = list(base_params.items()) + [("offset", offset)]
-                    url = "https://www.ncdc.noaa.gov/cdo-web/api/v2/data"
-                    headers = {"token": noaa_token}
-
-                    r = safe_request(url, headers=headers, params=params_list, max_retries=3, timeout=30)
-                    if r is None:
-                        logging.error(f"Failed NOAA request daily for {city} => skipping chunk.")
-                        break
-
-                    if r.status_code != 200:
-                        logging.error(f"NOAA daily request => status {r.status_code}, skipping.")
                         break
 
                     resp_json = r.json()
@@ -331,9 +176,11 @@ def fetch_noaa_historical_daily_data(regions_dict, years=1, noaa_token=NOAA_API_
                 logging.warning(f"Missing TMIN/TMAX => skipping city {city}.")
                 continue
 
+            # Compute HDD
             city_data["TAVG"] = (city_data["TMAX"] + city_data["TMIN"]) / 2.0
-            city_data["HDD"] = np.maximum(0, 65 - city_data["TAVG"])
+            city_data["HDD"] = np.maximum(0, HDD_BASE_TEMP - city_data["TAVG"])
 
+            # Accumulate results
             for idx, row_data in city_data.iterrows():
                 rows.append({
                     "date": row_data["date"],
@@ -347,6 +194,7 @@ def fetch_noaa_historical_daily_data(regions_dict, years=1, noaa_token=NOAA_API_
         logging.error("No daily NOAA data returned at all.")
         return pd.DataFrame(columns=["date", "region", "HDD"])
 
+    # Merge population, compute Weighted HDD by region
     df_all = df_all.merge(
         pd.DataFrame([{"city": c, "population": CITY_INFO[c]["population"]} for c in CITY_INFO]),
         on="city",
@@ -355,10 +203,14 @@ def fetch_noaa_historical_daily_data(regions_dict, years=1, noaa_token=NOAA_API_
     region_pop = df_all.groupby("region")["population"].transform("sum")
     df_all["Weighted_HDD"] = df_all["HDD"] * (df_all["population"] / region_pop)
 
+    # Aggregate by region+date
     df_region_daily = df_all.groupby(["date", "region"], as_index=False).agg({"Weighted_HDD": "sum"})
     df_region_daily.rename(columns={"Weighted_HDD": "HDD"}, inplace=True)
     return df_region_daily
 
+# -------------------------------------
+# 4. IB Client & fetch_ng_futures_data
+# -------------------------------------
 class IBApp(EWrapper, EClient):
     def __init__(self):
         EClient.__init__(self, self)
@@ -394,8 +246,28 @@ def create_ng_futures_contract():
     return contract
 
 def fetch_ng_futures_data(start_date, end_date):
+    """
+    Fetch NG futures data from Interactive Brokers for the specified start/end date.
+    We'll convert that window to a duration string for daily bars.
+    """
+    if not start_date or not end_date:
+        logging.error("Invalid start/end date for IB request.")
+        return pd.DataFrame()
+
+    total_days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days
+    if total_days <= 0:
+        logging.error(f"Invalid date range: {start_date} -> {end_date}")
+        return pd.DataFrame()
+
+    # For daily bars, we can specify "<total_days> D"
+    # If you truly want a strict "2 Y" approach, you can forcibly do "2 Y" here instead.
+    duration_str = f"{total_days} D"
+
+    logging.info(f"Fetching NG futures data from IB: {start_date} to {end_date}, duration={duration_str}")
+
     app = IBApp()
     try:
+        # Adjust host/port/clientId as needed
         app.connect("127.0.0.1", 7496, clientId=123)
     except Exception as e:
         logging.error(f"Could not connect to IB API: {e}")
@@ -405,13 +277,14 @@ def fetch_ng_futures_data(start_date, end_date):
     thread.start()
 
     contract = create_ng_futures_contract()
-    end_dt_str = datetime.now().strftime("%Y%m%d-%H:%M:%S")
+    # IB wants endDateTime in "YYYYMMDD HH:MM:SS" format
+    end_dt_str = pd.to_datetime(end_date).strftime("%Y%m%d %H:%M:%S")
 
     app.reqHistoricalData(
         reqId=1,
         contract=contract,
         endDateTime=end_dt_str,
-        durationStr="2 Y",      # or "1 Y" if you want a smaller range
+        durationStr=duration_str,
         barSizeSetting="1 day",
         whatToShow="TRADES",
         useRTH=1,
@@ -425,21 +298,18 @@ def fetch_ng_futures_data(start_date, end_date):
     while not app.done and (time.time() - start_wait) < timeout:
         time.sleep(0.1)
 
-    # Check if we timed out
     if not app.done:
         logging.warning("Historical data request timed out.")
 
-    # Disconnect from IB regardless
     app.disconnect()
 
-    # Build DataFrame from the collected bars
+    # Build DataFrame
     df = pd.DataFrame(app.historical_data)
     logging.info(f"IB returned {len(app.historical_data)} bars for NG data.")
     if df.empty:
         logging.warning("No NG futures data returned from IB.")
         return df
 
-    # Rename columns to standard names
     df.rename(columns={
         "date": "Date",
         "open": "Open",
@@ -449,7 +319,6 @@ def fetch_ng_futures_data(start_date, end_date):
         "volume": "Volume",
     }, inplace=True)
 
-    # Convert Date column to datetime and sort
     df["Date"] = pd.to_datetime(df["Date"])
     df.sort_values("Date", inplace=True)
 
@@ -457,21 +326,92 @@ def fetch_ng_futures_data(start_date, end_date):
         f"Price DataFrame shape: {df.shape}, "
         f"Dates: {df['Date'].min()} -> {df['Date'].max()}"
     )
-
     return df
 
+# ----------------------------------
+# 5. Align NOAA & IB Data by date
+# ----------------------------------
+def align_noaa_and_prices(noaa_df, price_df):
+    """
+    Ensures noaa_df (with columns [date, region, HDD]) and
+    price_df (with column [Date, Close] or renamed to [date])
+    only keep overlapping dates. Returns a merged DataFrame
+    with columns ["date", "region1", "region2", ..., "Close"].
+    """
+    if noaa_df.empty or price_df.empty:
+        return pd.DataFrame()
+
+    # Standardize date columns
+    noaa_df["date"] = pd.to_datetime(noaa_df["date"])
+    price_df["Date"] = pd.to_datetime(price_df["Date"])
+
+    # Pivot NOAA from [date, region, HDD] to wide format
+    pivot_noaa = noaa_df.pivot(index="date", columns="region", values="HDD").reset_index()
+    pivot_noaa.columns.name = None
+
+    # Rename "Date" -> "date" in price
+    price_df = price_df.rename(columns={"Date": "date"})
+
+    # Inner-merge on "date"
+    merged = pd.merge(pivot_noaa, price_df[["date", "Close"]], on="date", how="inner")
+
+    return merged
+
+# ---------------------------------
+# 6. Additional utility functions
+# ---------------------------------
 def fetch_eia_storage_data():
+    """Placeholder for EIA data retrieval. Returns sample dictionary."""
     return {
         "East": -3.0,
         "Midwest": -2.0,
         "Mountain": 0.5
     }
 
+def fetch_forecast_temperatures(lat: float, lon: float, days: int = FORECAST_DAYS):
+    """Example open‐meteocall to get next 7 days min/max."""
+    endpoint = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "daily": ["temperature_2m_max", "temperature_2m_min"],
+        "forecast_days": days,
+        "temperature_unit": "fahrenheit",
+        "timezone": "auto",
+    }
+    response = safe_request(endpoint, params=params, timeout=10, max_retries=3)
+    if response is None:
+        logging.error(f"Failed forecast fetch lat={lat}, lon={lon}. Returning empty DataFrame.")
+        return pd.DataFrame(columns=["date", "temp_min", "temp_max"])
+
+    data = response.json()
+    if "daily" not in data or "time" not in data["daily"]:
+        logging.error("Forecast API returned invalid data structure.")
+        return pd.DataFrame(columns=["date", "temp_min", "temp_max"])
+
+    dates = data["daily"]["time"]
+    temp_mins = data["daily"].get("temperature_2m_min", [])
+    temp_maxs = data["daily"].get("temperature_2m_max", [])
+    if not dates or not temp_mins or not temp_maxs:
+        logging.error("Forecast API returned empty lists for time or temperatures.")
+        return pd.DataFrame(columns=["date", "temp_min", "temp_max"])
+
+    df = pd.DataFrame({
+        "date": pd.to_datetime(dates),
+        "temp_min": temp_mins,
+        "temp_max": temp_maxs
+    })
+    return df
+
 def calculate_hdd(row):
     avg_temp = (row["temp_min"] + row["temp_max"]) / 2.0
     return max(0, HDD_BASE_TEMP - avg_temp)
 
 def aggregate_region_hdd(city_forecasts):
+    """
+    For each city forecast DF (with columns [date, temp_min, temp_max]),
+    compute HDD, weight by population, and sum across the region.
+    """
     total_pop = sum(CITY_INFO[city]["population"] for city in city_forecasts)
     if total_pop == 0:
         logging.warning("Warning: total population=0 => using equal weighting.")
@@ -528,6 +468,9 @@ def calculate_gwdd(region_forecast_dfs, region_noaa_avgs):
     gwdd_df.sort_values("date", inplace=True)
     return gwdd_df[["date", "GWDD"]]
 
+# -------------------------------------------------
+# 7. Example signals, scenario matrix, final main()
+# -------------------------------------------------
 def generate_signals(region_hdd_df, region_name, noaa_avg_hdd, ng_price_df, eia_storage):
     signals = {}
 
@@ -641,22 +584,87 @@ def estimate_price_move(df, hdd_col):
 def main():
     logging.info("Starting Heating Degree Days analysis and NG signal generation...")
 
-    region_noaa_avgs = fetch_noaa_historical_data(REGIONS, years=HISTORICAL_YEARS)
-    if not region_noaa_avgs:
-        logging.error("Failed NOAA avg data => exit.")
-        return
+    # -----------------------------
+    # 1) Decide your date range
+    # -----------------------------
+    end_date = datetime.now().date() - timedelta(days=1)
+    start_date = end_date - timedelta(days=365 * 2)
 
-    df_region_daily_hdd = fetch_noaa_historical_daily_data(REGIONS, years=HISTORICAL_YEARS)
+    # -----------------------------
+    # 2) Fetch NOAA daily HDD
+    # -----------------------------
+    df_region_daily_hdd = fetch_noaa_historical_daily_data(REGIONS, start_date, end_date)
     if df_region_daily_hdd.empty:
         logging.error("No daily NOAA => skip correlation.")
         df_region_daily_hdd = pd.DataFrame()
 
+    # -----------------------------
+    # 3) Fetch NG Futures from IB
+    # -----------------------------
+    ng_prices_df = fetch_ng_futures_data(start_date, end_date)
+    if ng_prices_df.empty:
+        logging.warning("No NG price data => correlation may be incomplete.")
+
+    # -----------------------------
+    # 4) Align NOAA & IB data
+    # -----------------------------
+    aligned_df = align_noaa_and_prices(df_region_daily_hdd, ng_prices_df)
+
+    if aligned_df.empty:
+        logging.warning("No overlap between NOAA daily data and NG price data.")
+        # You can decide if you want to return or proceed with no correlation.
+        # For now we just proceed with an empty check.
+    else:
+        # Optional: Filter for winter months
+        aligned_df = aligned_df[aligned_df["date"].dt.month.isin([10, 11, 12, 1, 2, 3, 4])]
+
+        # Drop rows missing key columns
+        subset_cols = ["Close"] + list(REGIONS.keys())
+        aligned_df.dropna(subset=subset_cols, inplace=True)
+        aligned_df.sort_values("date", inplace=True)
+
+        # Add Price_Change + region changes
+        aligned_df["Price_Change"] = aligned_df["Close"].pct_change() * 100
+        for region in REGIONS:
+            if region in aligned_df.columns:
+                aligned_df[f"{region}_Change"] = aligned_df[region].pct_change() * 100
+
+        logging.info(f"Final winter subset rows: {len(aligned_df)}")
+
+        # Print count & std dev for each region's % change
+        for region in REGIONS:
+            col = f"{region}_Change"
+            if col in aligned_df.columns:
+                region_count = aligned_df[col].count()
+                region_std = aligned_df[col].std()
+                logging.info(f"{region} => count= {region_count}, std dev= {region_std}")
+
+        # Now do correlation matrix
+        cols_of_interest = ["Price_Change"] + [f"{r}_Change" for r in REGIONS if f"{r}_Change" in aligned_df.columns]
+        if len(cols_of_interest) > 1:
+            corr_matrix = aligned_df[cols_of_interest].corr()
+            logging.info("\nCorrelation Matrix (Daily % Changes):")
+            logging.info(f"\n{corr_matrix}")
+
+            # Scenario matrix
+            scenario_df = scenario_matrix(
+                aligned_df,
+                [f"{r}_Change" for r in REGIONS if f"{r}_Change" in aligned_df.columns],
+                hdd_changes=[-20, -10, 0, 10, 20]
+            )
+            logging.info("\nScenario Matrix (price move vs. hypothetical HDD changes):")
+            logging.info(f"\n{scenario_df.to_string(index=False)}")
+
+    # -----------------------------
+    # 5) EIA storage, region averages, signals
+    # -----------------------------
     eia_storage_data = fetch_eia_storage_data()
 
-    ng_prices_df = fetch_ng_futures_data(start_date="20230101", end_date="20240101")
-    if ng_prices_df.empty:
-        logging.warning("No NG price data => correlation incomplete.")
+    # If you also have a function for region_noaa_avgs (like old fetch_noaa_historical_data),
+    # you could compute those or skip. Let's skip or assume some known dictionary:
+    region_noaa_avgs = {"Northeast": 10, "Midwest": 12, "Mountain": 15}  # Example only
 
+    # Forecast logic
     CITY_COORDS = {
         "New York City": (40.7128, -74.0060),
         "Boston":        (42.3601, -71.0589),
@@ -666,8 +674,8 @@ def main():
         "Salt Lake City":(40.7608, -111.8910),
     }
 
-    region_signals = {}
     region_forecast_dfs = {}
+    region_signals = {}
 
     for region_name, cities in REGIONS.items():
         city_forecasts = {}
@@ -691,95 +699,13 @@ def main():
 
     gwdd_df = calculate_gwdd(region_forecast_dfs, region_noaa_avgs)
 
-    # Only proceed if we have NOAA daily HDD + NG price data
-    if not df_region_daily_hdd.empty and not ng_prices_df.empty:
-        df_hdd_pivot = df_region_daily_hdd.pivot(index="date", columns="region", values="HDD").reset_index()
-        df_hdd_pivot.columns.name = None
+    # Print signals, etc.
+    for region_name, sig in region_signals.items():
+        logging.info(f"Region: {region_name}, Signals: {sig}")
 
-        df_hdd_pivot["date"] = pd.to_datetime(df_hdd_pivot["date"])
-        ng_prices_df["Date"] = pd.to_datetime(ng_prices_df["Date"])
-
-        # Combine NOAA + Price date ranges
-        hdd_min = df_hdd_pivot["date"].min()
-        hdd_max = df_hdd_pivot["date"].max()
-        price_min = ng_prices_df["Date"].min()
-        price_max = ng_prices_df["Date"].max()
-
-        start_common = max(hdd_min, price_min)
-        end_common   = min(hdd_max, price_max)
-
-        df_hdd_pivot = df_hdd_pivot[
-            (df_hdd_pivot["date"] >= start_common) &
-            (df_hdd_pivot["date"] <= end_common)
-        ]
-        df_prices_filtered = ng_prices_df[
-            (ng_prices_df["Date"] >= start_common) &
-            (ng_prices_df["Date"] <= end_common)
-        ].copy()
-        df_prices_filtered.rename(columns={"Date":"date"}, inplace=True)
-
-        df_merged = pd.merge(
-            df_hdd_pivot,
-            df_prices_filtered[["date", "Close"]],
-            on="date",
-            how="inner"
-        )
-
-        # Filter for winter months only
-        df_merged = df_merged[df_merged["date"].dt.month.isin([10, 11, 12, 1, 2, 3, 4])]
-
-        # Drop any remaining rows missing key columns
-        subset_cols = ["Close"] + [r for r in REGIONS if r in df_merged.columns]
-        df_merged.dropna(subset=subset_cols, inplace=True)
-        df_merged.sort_values("date", inplace=True)
-
-        # Add Price_Change + region changes
-        df_merged["Price_Change"] = df_merged["Close"].pct_change() * 100
-        for region in REGIONS:
-            if region in df_merged.columns:
-                df_merged[f"{region}_Change"] = df_merged[region].pct_change() * 100
-
-        # === NEW: Print how many winter rows remain
-        logging.info(f"Final winter subset rows: {len(df_merged)}")
-
-        # === NEW: Print count & std dev for each region's % change
-        for region in REGIONS:
-            col = f"{region}_Change"
-            if col in df_merged.columns:
-                region_count = df_merged[col].count()
-                region_std = df_merged[col].std()
-                logging.info(f"{region} => count= {region_count}, std dev= {region_std}")
-
-        # Now do correlation
-        cols_of_interest = ["Price_Change"] + [f"{r}_Change" for r in REGIONS if f"{r}_Change" in df_merged.columns]
-        corr_matrix = df_merged[cols_of_interest].corr()
-        logging.info("\nCorrelation Matrix (Daily % Changes):")
-        logging.info(f"\n{corr_matrix}")
-
-        # Scenario matrix
-        scenario_df = scenario_matrix(
-            df_merged,
-            [f"{r}_Change" for r in REGIONS if f"{r}_Change" in df_merged.columns],
-            hdd_changes=[-20, -10, 0, 10, 20]
-        )
-        logging.info("\nScenario Matrix (price move vs. hypothetical HDD changes):")
-        logging.info(f"\n{scenario_df.to_string(index=False)}")
-    else:
-        logging.warning("Skipping correlation => daily data incomplete.")
-
-    logging.info("\n=== NOAA 1-Year+ Avg HDD (Weighted) by Region ===")
-    for region_name, val in region_noaa_avgs.items():
-        logging.info(f"{region_name}: {val:.2f}")
-
-    logging.info("\n=== 7-Day Forecast HDDs & Signals Per Region ===")
-    for region, signals in region_signals.items():
-        logging.info(f"\nRegion: {region}")
-        logging.info(f"Forecasted HDD Data:\n{region_forecast_dfs[region].to_string(index=False)}")
-        logging.info(f"Signals: {signals}")
-
-    logging.info("\n=== Gas Weighted Degree Days (GWDD) - 7-Day Forecast ===")
     if not gwdd_df.empty:
-        logging.info(f"\n{gwdd_df.to_string(index=False)}")
+        logging.info("\nGWDD (Gas Weighted Degree Days) Forecast:\n")
+        logging.info(f"{gwdd_df.to_string(index=False)}")
     else:
         logging.info("No GWDD data available.")
 
