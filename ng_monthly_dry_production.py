@@ -56,6 +56,9 @@ import os
 import requests
 import json
 
+from dotenv import load_dotenv
+load_dotenv()
+
 def main():
     # Read token from environment
     EIA_TOKEN = os.environ.get("EIA_TOKEN")
