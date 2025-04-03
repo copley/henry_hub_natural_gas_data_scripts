@@ -9,7 +9,7 @@ Purpose:
   - Apply a simple price-sensitivity matrix.
   - Print out a 24-hour bullish/bearish "bias."
 
-Uses EIA's v2 API structure.
+Uses EIA's v2 API structure, with retry logic + longer timeouts.
 
 Author: YourName
 """
@@ -33,10 +33,6 @@ class IBApiWrapper(EWrapper):
         self.ready = False
 
     def tickPrice(self, reqId, tickType, price, attrib):
-        """
-        Called continuously once we request market data.
-        We filter for 'Last Price' or 'Delayed Last Price' from IB.
-        """
         if tickType in (4, 68) and price > 0:  # 4=LAST, 68=DELAYED_LAST
             self.lastPrice = price
             self.ready = True
@@ -50,85 +46,91 @@ class IBApiClient(EClient):
         super().__init__(wrapper)
 
 
+def fetch_eia_data_with_retry(url, max_retries=3, backoff=5):
+    """
+    Generic helper to fetch EIA API data with retries and longer timeout.
+    :param url: EIA v2 endpoint
+    :param max_retries: number of attempts before giving up
+    :param backoff: seconds to wait between retries (increases each attempt)
+    :return: parsed JSON dict or None if all retries fail
+    """
+    for attempt in range(max_retries):
+        try:
+            # Increase timeout to 60s for slow responses
+            resp = requests.get(url, timeout=60)
+            if resp.status_code != 200:
+                print(f"[EIA] Request error: {resp.status_code} - {resp.text}")
+                return None
+            return resp.json()
+        except Exception as e:
+            print(f"[EIA] Attempt {attempt + 1} of {max_retries}: {e}")
+            if attempt < max_retries - 1:
+                wait_time = backoff * (attempt + 1)
+                print(f"[EIA] Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+    # If we exhaust all retries
+    return None
+
+
 def get_eia_dry_gas_production(eia_api_key):
     """
-    Fetch monthly natural gas marketed production data in MMCF (millions cubic feet),
-    from EIA's v2 API. We'll convert to Bcf/day as a rough estimate.
-
-    Series ID example: NG.N9050US2.M
-    (But now parsed from the 'response.data' array.)
+    Fetch monthly natural gas marketed production data from EIA's v2 API.
+    Convert from MMCF to Bcf/day.
     """
     series_id = "NG.N9050US2.M"
     url = f"https://api.eia.gov/v2/seriesid/{series_id}?api_key={eia_api_key}"
 
-    try:
-        resp = requests.get(url, timeout=10)
-        if resp.status_code != 200:
-            print(f"[EIA] Request error: {resp.status_code} - {resp.text}")
-            return None
-
-        raw_data = resp.json()
-        # v2 structure: check "response" -> "data"
-        if "response" not in raw_data or "data" not in raw_data["response"]:
-            print(f"[EIA] 'response' or 'data' key missing: {raw_data}")
-            return None
-
-        data_list = raw_data["response"]["data"]
-        if not data_list:
-            print("[EIA] 'data' array is empty.")
-            return None
-
-        # The first element is typically the most recent month
-        latest_record = data_list[0]
-        mmcf_month = latest_record["value"]  # e.g. 3,525,720 MMCF
-        # Convert MMCF -> Bcf
-        bcf_month = mmcf_month / 1000.0
-        # Approx daily Bcf
-        daily_bcf = bcf_month / 30.0
-
-        return daily_bcf
-
-    except Exception as e:
-        print(f"[EIA] Could not fetch production data: {e}")
+    raw_data = fetch_eia_data_with_retry(url)
+    if not raw_data:
+        print("[EIA] Could not fetch production data (all retries failed).")
         return None
+
+    # Parse new v2 structure
+    if "response" not in raw_data or "data" not in raw_data["response"]:
+        print(f"[EIA] 'response' or 'data' key missing: {raw_data}")
+        return None
+
+    data_list = raw_data["response"]["data"]
+    if not data_list:
+        print("[EIA] 'data' array is empty.")
+        return None
+
+    latest_record = data_list[0]
+    mmcf_month = latest_record["value"]  # e.g. 3525720 (MMCF)
+    # Convert MMCF -> Bcf: mmcf_month / 1000
+    bcf_month = mmcf_month / 1000.0
+    # Then Bcf/day (approx)
+    daily_bcf = bcf_month / 30.0
+    return daily_bcf
 
 
 def get_eia_demand_estimate(eia_api_key):
     """
-    Fetch monthly total natural gas consumption from EIA's v2 API, also in MMCF.
-    Convert to Bcf/day.
-
-    Series ID: NG.N9140US2.M (Total consumption)
+    Fetch monthly total natural gas consumption from EIA's v2 API.
+    Convert from MMCF to Bcf/day.
     """
     series_id = "NG.N9140US2.M"
     url = f"https://api.eia.gov/v2/seriesid/{series_id}?api_key={eia_api_key}"
 
-    try:
-        resp = requests.get(url, timeout=10)
-        if resp.status_code != 200:
-            print(f"[EIA] Request error: {resp.status_code} - {resp.text}")
-            return None
-
-        raw_data = resp.json()
-        if "response" not in raw_data or "data" not in raw_data["response"]:
-            print(f"[EIA] 'response' or 'data' key missing: {raw_data}")
-            return None
-
-        data_list = raw_data["response"]["data"]
-        if not data_list:
-            print("[EIA] 'data' array is empty.")
-            return None
-
-        latest_record = data_list[0]
-        mmcf_month = latest_record["value"]  # e.g. 3,921,942 MMCF
-        bcf_month = mmcf_month / 1000.0
-        daily_bcf = bcf_month / 30.0
-
-        return daily_bcf
-
-    except Exception as e:
-        print(f"[EIA] Could not fetch consumption data: {e}")
+    raw_data = fetch_eia_data_with_retry(url)
+    if not raw_data:
+        print("[EIA] Could not fetch consumption data (all retries failed).")
         return None
+
+    if "response" not in raw_data or "data" not in raw_data["response"]:
+        print(f"[EIA] 'response' or 'data' key missing: {raw_data}")
+        return None
+
+    data_list = raw_data["response"]["data"]
+    if not data_list:
+        print("[EIA] 'data' array is empty.")
+        return None
+
+    latest_record = data_list[0]
+    mmcf_month = latest_record["value"]
+    bcf_month = mmcf_month / 1000.0
+    daily_bcf = bcf_month / 30.0
+    return daily_bcf
 
 
 def price_sensitivity_matrix(net_bcfd):
@@ -150,7 +152,7 @@ def price_sensitivity_matrix(net_bcfd):
 
 
 class NGTerminalApp(IBApiWrapper, IBApiClient):
-    def __init__(self, host='127.0.0.1', port=7497, clientId=123):
+    def __init__(self, host='127.0.0.1', port=7496, clientId=3):
         IBApiWrapper.__init__(self)
         IBApiClient.__init__(self, wrapper=self)
         self.host = host
@@ -201,7 +203,8 @@ def main():
     print(f"--> Expected Price Move: {sens['expected_price_move']}")
     print("================================\n")
 
-    app = NGTerminalApp(host='127.0.0.1', port=7497, clientId=123)
+    # Connect to IB to fetch real-time NG price
+    app = NGTerminalApp(host='127.0.0.1', port=7496, clientId=72)
     app.start_app()
 
     reqId = 1
