@@ -1,31 +1,27 @@
 #!/usr/bin/env python3
 """
-ng_daily_terminal.py
+ng_fundamentals_logger.py
 
 Purpose:
   - Pull EIA data for natural gas supply (Marketed Production) or consumption (Total).
-  - Connect to IBAPI for live NG price.
-  - Estimate daily net supply/demand.
-  - Apply a simple price-sensitivity matrix.
-  - Print out a 24-hour bullish/bearish "bias."
-
-Uses EIA's v2 API structure, with retry logic + longer timeouts.
-
-Author: YourName
+  - Connect to IB TWS for a real-time Henry Hub futures price.
+  - Estimate net supply/demand and classify the market as bullish/bearish.
+  - Print final results, log them with timestamps, and show a 24-hour forecast window.
 """
 
 import os
 import time
 import requests
 import math
-import threading  # <-- Added for running IB's loop in a background thread
+import threading
 from dotenv import load_dotenv
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo  # For New Zealand timezone
 
-# --- IBAPI imports ---
+# IB API imports
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
-
 
 class IBApiWrapper(EWrapper):
     def __init__(self):
@@ -34,30 +30,20 @@ class IBApiWrapper(EWrapper):
         self.ready = False
 
     def tickPrice(self, reqId, tickType, price, attrib):
-        if tickType in (4, 68) and price > 0:  # 4=LAST, 68=DELAYED_LAST
+        if tickType in (4, 68) and price > 0:
             self.lastPrice = price
             self.ready = True
 
     def error(self, reqId, errorCode, errorString):
         print(f"[IB ERROR] reqId={reqId} code={errorCode} msg={errorString}")
 
-
 class IBApiClient(EClient):
     def __init__(self, wrapper):
         super().__init__(wrapper)
 
-
 def fetch_eia_data_with_retry(url, max_retries=3, backoff=5):
-    """
-    Generic helper to fetch EIA API data with retries and longer timeout.
-    :param url: EIA v2 endpoint
-    :param max_retries: number of attempts before giving up
-    :param backoff: seconds to wait between retries (increases each attempt)
-    :return: parsed JSON dict or None if all retries fail
-    """
     for attempt in range(max_retries):
         try:
-            # Increase timeout to 60s for slow responses
             resp = requests.get(url, timeout=60)
             if resp.status_code != 200:
                 print(f"[EIA] Request error: {resp.status_code} - {resp.text}")
@@ -69,24 +55,16 @@ def fetch_eia_data_with_retry(url, max_retries=3, backoff=5):
                 wait_time = backoff * (attempt + 1)
                 print(f"[EIA] Retrying in {wait_time} seconds...")
                 time.sleep(wait_time)
-    # If we exhaust all retries
     return None
 
-
 def get_eia_dry_gas_production(eia_api_key):
-    """
-    Fetch monthly natural gas marketed production data from EIA's v2 API.
-    Convert from MMCF to Bcf/day.
-    """
     series_id = "NG.N9050US2.M"
     url = f"https://api.eia.gov/v2/seriesid/{series_id}?api_key={eia_api_key}"
-
     raw_data = fetch_eia_data_with_retry(url)
     if not raw_data:
         print("[EIA] Could not fetch production data (all retries failed).")
         return None
 
-    # Parse new v2 structure
     if "response" not in raw_data or "data" not in raw_data["response"]:
         print(f"[EIA] 'response' or 'data' key missing: {raw_data}")
         return None
@@ -97,22 +75,14 @@ def get_eia_dry_gas_production(eia_api_key):
         return None
 
     latest_record = data_list[0]
-    mmcf_month = latest_record["value"]  # e.g. 3525720 (MMCF)
-    # Convert MMCF -> Bcf: mmcf_month / 1000
+    mmcf_month = latest_record["value"]
     bcf_month = mmcf_month / 1000.0
-    # Then Bcf/day (approx)
     daily_bcf = bcf_month / 30.0
     return daily_bcf
 
-
 def get_eia_demand_estimate(eia_api_key):
-    """
-    Fetch monthly total natural gas consumption from EIA's v2 API.
-    Convert from MMCF to Bcf/day.
-    """
     series_id = "NG.N9140US2.M"
     url = f"https://api.eia.gov/v2/seriesid/{series_id}?api_key={eia_api_key}"
-
     raw_data = fetch_eia_data_with_retry(url)
     if not raw_data:
         print("[EIA] Could not fetch consumption data (all retries failed).")
@@ -133,7 +103,6 @@ def get_eia_demand_estimate(eia_api_key):
     daily_bcf = bcf_month / 30.0
     return daily_bcf
 
-
 def price_sensitivity_matrix(net_bcfd):
     nb = round(net_bcfd)
     if nb <= -10:
@@ -151,7 +120,6 @@ def price_sensitivity_matrix(net_bcfd):
     else:
         return {'sentiment': '🧨 Very Bearish', 'expected_price_move': '-$0.75 to -$1.50+'}
 
-
 class NGTerminalApp(IBApiWrapper, IBApiClient):
     def __init__(self, host='127.0.0.1', port=7496, clientId=3):
         IBApiWrapper.__init__(self)
@@ -160,7 +128,6 @@ class NGTerminalApp(IBApiWrapper, IBApiClient):
         self.port = port
         self.clientId = clientId
 
-        # Henry Hub NG (NYMEX) front-month contract example:
         self.contract = Contract()
         self.contract.symbol = "NG"
         self.contract.secType = "FUT"
@@ -171,14 +138,12 @@ class NGTerminalApp(IBApiWrapper, IBApiClient):
     def start_app(self):
         print("[INFO] Connecting to IB TWS...")
         self.connect(self.host, self.port, self.clientId)
-        # Run 'self.run()' in a background thread to avoid blocking the main thread
         thread = threading.Thread(target=self.run, daemon=True)
         thread.start()
 
     def stop_app(self):
         print("[INFO] Disconnecting from IB TWS...")
         self.disconnect()
-
 
 def main():
     load_dotenv()
@@ -188,45 +153,74 @@ def main():
         print("[ERROR] Please set your EIA_API_KEY in a .env file or as an environment variable.")
         return
 
+    log_lines = []
+
+    # 1) Fetch Data
     dry_gas_prod = get_eia_dry_gas_production(eia_api_key)
     total_demand = get_eia_demand_estimate(eia_api_key)
 
     if (dry_gas_prod is None) or (total_demand is None):
-        print("[ERROR] Could not retrieve fundamental data. Exiting.")
+        log_lines.append("[ERROR] Could not retrieve fundamental data. Exiting.")
+        print("\n".join(log_lines))
+        with open("ng_script.log", "a") as f:
+            tstamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"{tstamp} -- {log_lines[-1]}\n")
         return
 
+    # 2) Net supply & matrix
     net_bcfd = dry_gas_prod - total_demand
     sens = price_sensitivity_matrix(net_bcfd)
 
-    print("\n=== NATURAL GAS FUNDAMENTALS ===")
-    print(f"Estimated Production (Bcf/day): {dry_gas_prod:.2f}")
-    print(f"Estimated Demand     (Bcf/day): {total_demand:.2f}")
-    print(f"Net Supply (Bcf/day): {net_bcfd:.2f}")
-    print(f"--> Matrix Sentiment: {sens['sentiment']}")
-    print(f"--> Expected Price Move: {sens['expected_price_move']}")
-    print("================================\n")
+    # 3) Fundamentals lines
+    fundamentals_header = "\n=== NATURAL GAS FUNDAMENTALS ==="
+    fundamentals = [
+        f"Estimated Production (Bcf/day): {dry_gas_prod:.2f}",
+        f"Estimated Demand     (Bcf/day): {total_demand:.2f}",
+        f"Net Supply (Bcf/day): {net_bcfd:.2f}",
+        f"--> Matrix Sentiment: {sens['sentiment']}",
+        f"--> Expected Price Move: {sens['expected_price_move']}",
+        "================================"
+    ]
+    log_lines.append(fundamentals_header)
+    log_lines.extend(fundamentals)
 
-    # Connect to IB to fetch real-time NG price
+    # 4) IB connection
     app = NGTerminalApp(host='127.0.0.1', port=7496, clientId=4)
     app.start_app()
 
     reqId = 1
-    app.reqMarketDataType(1)  # Live market data
+    app.reqMarketDataType(1)
     app.reqMktData(reqId, app.contract, "", False, False, [])
 
-    print("[INFO] Waiting for IB price updates...")
+    # 5) Wait for IB data
+    log_lines.append("[INFO] Waiting for IB price updates...")
     start_time = time.time()
     while True:
         time.sleep(1)
         if app.ready or (time.time() - start_time) > 10:
             break
 
-    if app.lastPrice:
-        print(f"[IB] Current NG Price (approx): ${app.lastPrice:.2f}")
-    else:
-        print("[IB] No price received (check TWS settings and contract details).")
+    from datetime import datetime
 
-    # Simple final forecast snippet
+    # 6) Check price
+    if app.lastPrice:
+        now_utc = datetime.now(timezone.utc)
+        now_nzt = now_utc.astimezone(ZoneInfo("Pacific/Auckland"))
+
+        price_time_utc = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+        price_time_nzt = now_nzt.strftime("%Y-%m-%d %H:%M:%S NZT")
+
+        ib_price_line = (
+            f"[IB] Current NG Price (approx): ${app.lastPrice:.3f}\n"
+            f"as at (UTC): {price_time_utc}\n"
+            f"as at (NZT): {price_time_nzt}"
+        )
+    else:
+        ib_price_line = "[IB] No price received (check TWS settings and contract details)."
+
+    log_lines.append(ib_price_line)
+
+    # 7) Final forecast snippet
     if "Bullish" in sens['sentiment']:
         forecast_text = (
             "Forecast: Potential upward price pressure in the next 24 hours.\n"
@@ -242,14 +236,28 @@ def main():
             "Forecast: Relatively balanced market. Prices may remain range-bound.\n"
             "Reason: Supply ~ Demand. Major moves would require external shocks (weather, LNG, news)."
         )
+    forecast_header = "\n=== 24-HOUR FORECAST ==="
+    log_lines.append(forecast_header)
+    log_lines.append(forecast_text)
 
-    print("\n=== 24-HOUR FORECAST ===")
-    print(forecast_text)
-    print("================================\n")
+    # 8) Insert date/time stamp for results & mention the 24-hour validity
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_lines.append(f"(Timestamp: {now_str}) Forecast valid for the next 24 hours.")
+    log_lines.append("================================")
 
+    # 9) Stop IB
     app.stop_app()
-    # Optionally, wait a moment for the IB thread to exit gracefully
     time.sleep(1)
+
+    # 10) Print all final results
+    final_output = "\n".join(log_lines)
+    print(final_output)
+
+    # Log to file with timestamp
+    with open("ng_script.log", "a") as f:
+        run_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        f.write(f"\n[{run_stamp}] Script Run\n")
+        f.write(final_output + "\n")
 
 
 if __name__ == "__main__":
