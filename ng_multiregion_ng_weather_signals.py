@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import threading
 import time
+import logging
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -37,109 +38,89 @@ In Northeast or Midwest, you see mostly Region_HDD values because it’s cooler,
 Below each region’s forecast, you see a dictionary of calculated signals. These are heuristics summarizing temperature forecasts, price trends, and storage data into a single “bias” for each region.
 
 hdd_vs_1yr:
-
 Compares the average forecast HDD to the region’s 1-year historical HDD average.
-
 "Bullish" here means the forecast HDD is significantly above the historical average (colder than usual).
-
 "Bearish" would mean much lower HDD than usual (warmer than usual).
-
 "Neutral" indicates no strong deviation from typical HDD.
 
 delta_forecast:
-
 Looks at the 3-day rolling average of forecast HDD and checks how the last day’s rolling average compares to the first day’s.
-
 If it jumps more than a threshold, it’s Bullish (getting colder). If it drops below a threshold, it’s Bearish (warming up). Otherwise, Neutral.
 
 rolling_trend:
-
 Also uses a rolling(3) mean of HDD but specifically checks the difference between the earliest rolling value vs. the latest rolling value. If it’s positive (temps trending colder), you get Bullish, negative is Bearish, and near zero is Neutral.
 
 price_trend:
-
 Checks how the natural gas futures price has moved from the start to the end of the data you retrieved.
-
 Bullish if it increased by more than +2%, Bearish if it fell by more than -2%, else Neutral.
 
 storage:
-
 Uses EIA storage data for that region: if storage is significantly below normal, it’s Bullish for prices (indicating possible shortages). If it’s above normal, it’s Bearish (excess supply). Otherwise, it’s Neutral.
 
 final_signal:
-
 The script sums up how many Bullish vs. Bearish signals you have and picks the overall “bias.”
-
 "Bullish Bias" if bullish signals outnumber bearish ones.
-
 "Bearish Bias" if bearish signals outnumber bullish ones.
-
 "Neutral" if they’re roughly even or all moderate.
 
 3. Interpretation for Each Region
 Northeast:
-
 Forecast Region_HDD values are fairly high (18 to 27 HDD), suggesting cold temperatures.
-
 The script labels hdd_vs_1yr as “Bullish” (colder than normal).
-
 However, the day-to-day trend is slightly downward (the last few days from 25 HDD down to 10 HDD), so rolling_trend is “Bearish.”
-
 Storage is “Bullish” (implying below-average storage or deficits).
-
 Price is trending down (“Bearish”), leading to a final_signal of “Neutral.”
 
 Midwest:
-
 Similar story to Northeast: high HDD, but an overall negative rolling trend.
-
 Storage is also “Bullish,” price trend is “Bearish,” netting a final_signal of “Neutral.”
 
 South Central:
-
 There’s a mixture of HDD (some cooler days) and CDD (warmer days).
-
 hdd_vs_1yr is “Neutral” because the average HDD isn’t far off from historical.
-
 Day-to-day forecast isn’t moving drastically (delta_forecast: “Neutral”), but the short-term average is trending down → “Bearish.”
-
 Price is “Bearish,” storage is “Neutral,” so overall “Bearish Bias.”
 
 Mountain:
-
 Moderately high HDD (30 → 2 by the end), but again it’s trending downward.
-
 Storage is “Neutral,” price is “Bearish,” so the net effect is “Bearish Bias.”
 
 Pacific:
-
 Mostly CDD values (0.3 up to around 10.95), meaning it’s quite warm or warming up.
-
 hdd_vs_1yr is “Bearish,” which in this case means it’s less cold than normal (or more warm relative to historical HDD).
-
 That leads to a “Bearish Bias” overall.
 
 4. How You Might Use This Data
 Forecasted HDD/CDD gives direct insight into how cold or hot the region is likely to be over the next week, affecting heating or cooling demand.
-
 Signals let you quickly see if conditions favor bullish or bearish pressure on natural gas prices due to:
-
 Weather deviations (colder/warmer than historical).
-
 Changes from early to later forecast days.
-
 Rolling trends.
-
 Storage levels.
-
 Market price movement itself.
-
 This overall helps you decide if natural gas prices might be pushed up or down based on short-term demand, supply, and general market signals.
 """
 
 # ----------------------------
 # 1. Configuration & Constants
 # ----------------------------
+
+# --- NEW: Logger Setup ---
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
+# (Optional) file logging
+# file_handler = logging.FileHandler('noaa_coverage.log')
+# file_handler.setFormatter(formatter)
+# file_handler.setLevel(logging.INFO)
+# logger.addHandler(file_handler)
+# --- END Logger Setup ---
 
 load_dotenv()
 NOAA_API_TOKEN = os.getenv('NOAA_API_TOKEN')
@@ -170,6 +151,36 @@ REGIONS = {
 HDD_BASE_TEMP = 65
 FORECAST_DAYS = 7
 HISTORICAL_YEARS = 1
+
+# --- NEW: Coverage-Checking Method ---
+def verify_noaa_coverage(station_id, city_data, start_date, end_date):
+    """
+    Checks how many unique dates we received vs. how many dates were expected
+    in the NOAA retrieval period. Logs a warning if there's a shortfall.
+    """
+    if city_data.empty:
+        logger.warning(
+            f"No data at all for station {station_id} "
+            f"from {start_date} to {end_date}."
+        )
+        return
+
+    expected_days = (end_date - start_date).days + 1
+    actual_days = city_data['date'].nunique()
+
+    if actual_days < expected_days:
+        gap = expected_days - actual_days
+        logger.warning(
+            f"Missing {gap} day(s) of data for station {station_id} "
+            f"within {start_date} to {end_date}. "
+            f"(Expected {expected_days}, got {actual_days})"
+        )
+    else:
+        logger.info(
+            f"Station {station_id}: Found {actual_days} days of data for "
+            f"{expected_days} expected days — good coverage."
+        )
+# --- END Coverage-Checking Method ---
 
 # -----------------------------
 # 2. Data Retrieval Functions
@@ -300,25 +311,37 @@ def fetch_noaa_historical_data(regions_dict, years=1, noaa_token=NOAA_API_TOKEN)
             # Combine all chunks for this city
             if frames:
                 city_data = pd.concat(frames, ignore_index=True)
+
+                # (2) Verify coverage
+                verify_noaa_coverage(station_id, city_data, start_date, end_date)
+
+                # (3) Check partial missing TMIN/TMAX rows (only if columns exist)
+                if "TMIN" in city_data.columns and "TMAX" in city_data.columns:
+                    missing_tmin = city_data["TMIN"].isna().sum()
+                    missing_tmax = city_data["TMAX"].isna().sum()
+                    if missing_tmin > 0 or missing_tmax > 0:
+                        logger.warning(
+                            f"{station_id} has {missing_tmin} missing TMIN and "
+                            f"{missing_tmax} missing TMAX rows."
+                        )
             else:
                 print(f"No historical data returned for {city}.")
                 city_avgs[city] = {"avg_hdd": 0, "avg_cdd": 0, "population": population}
                 continue
 
-            # Check if TMIN/TMAX exist
+            # (4) Check if TMIN/TMAX exist at all
             if "TMIN" not in city_data.columns or "TMAX" not in city_data.columns:
                 print(f"Missing TMIN/TMAX data for {city}. Setting HDD & CDD to 0.")
                 city_avgs[city] = {"avg_hdd": 0, "avg_cdd": 0, "population": population}
                 continue
 
-            # Compute HDD & CDD
+            # (5) Now compute HDD & CDD
             city_data["TAVG"] = (city_data["TMAX"] + city_data["TMIN"]) / 2.0
             city_data["HDD"] = np.maximum(0, HDD_BASE_TEMP - city_data["TAVG"])
             city_data["CDD"] = np.maximum(0, city_data["TAVG"] - HDD_BASE_TEMP)
 
             avg_hdd = city_data["HDD"].mean()
             avg_cdd = city_data["CDD"].mean()
-
             city_avgs[city] = {
                 "avg_hdd": avg_hdd,
                 "avg_cdd": avg_cdd,
@@ -703,7 +726,6 @@ def main():
     gwdd_df = calculate_gwdd(region_forecast_dfs, region_noaa_avgs)
 
     # 6) Print out results
-
     print("\n=== 7-Day Forecast HDD & CDD & Signals Per Region ===")
     for region, signals in region_signals.items():
         print(f"\nRegion: {region}")
