@@ -26,35 +26,20 @@ if not OPENAI_API_KEY:
 openai.api_key = OPENAI_API_KEY
 
 ###############################################################################
-# NEW HELPER FUNCTION
+# HELPER FUNCTIONS
 ###############################################################################
 
 def parse_ib_date(date_str):
-    """
-    Attempt to parse IB's date string for daily bars, e.g. "20250326".
-    We'll assume it covers the entire trading day, so we approximate
-    the bar time as 23:59:59 for daily data.
-    If we see a time portion (e.g. "YYYYMMDD HH:MM:SS"), we'll parse directly.
-    """
     if " " in date_str:
-        # Try parsing "YYYYMMDD HH:MM:SS"
         try:
             return datetime.strptime(date_str, "%Y%m%d %H:%M:%S")
         except ValueError:
             pass
-
-    # Otherwise, assume format "YYYYMMDD" for daily bars
     if len(date_str) == 8:
         dt = datetime.strptime(date_str, "%Y%m%d")
         dt = dt.replace(hour=23, minute=59, second=59)
         return dt
-
-    # Fallback: if something unexpected, just return the string
     return date_str
-
-###############################################################################
-# 1. HELPER FUNCTIONS
-###############################################################################
 
 def compute_moving_average(series, window):
     return series.rolling(window=window).mean()
@@ -122,9 +107,6 @@ def compute_pivots_s_r(H, L, C):
     return pp, r1, r2, r3, s1, s2, s3
 
 def compute_std_devs(series_close, stdev_multiplier=[1,2,3]):
-    """
-    Compute standard deviations from the last 5 bars.
-    """
     last_5 = series_close.iloc[-5:]
     avg = last_5.mean()
     diffs = last_5 - avg
@@ -154,61 +136,42 @@ def indicator_signal(value, threshold_up=0, threshold_down=0):
         return 0
 
 def barchart_opinion_logic(df):
-    """
-    Original Barchart-style logic from your code.
-    We keep it intact, only returning a final opinion at the end.
-    """
     last = df.iloc[-1]
 
-    # 1) Short Term (≈20 days)
     short_signals = []
     price20ma = last['close'] - last['MA_20']
     short_signals.append(indicator_signal(price20ma))
-
     short_slope_7 = df['close'].diff().tail(7).mean()
     short_signals.append(indicator_signal(short_slope_7))
-
-    # placeholder for Bollinger or other short-term
     short_signals.append(0)
-
-    # 20-50 day MA crossover
     if last['MA_20'] > last['MA_50']:
         short_signals.append(1)
     else:
         short_signals.append(-1)
+    short_signals.append(0)
 
-    short_signals.append(0)  # another placeholder
-
-    # 2) Medium Term (≈50 days)
     medium_signals = []
     price50ma = last['close'] - last['MA_50']
     medium_signals.append(indicator_signal(price50ma))
-
     if last['MA_20'] > last['MA_100']:
         medium_signals.append(1)
     else:
         medium_signals.append(-1)
+    medium_signals.append(0)
+    medium_signals.append(0)
 
-    medium_signals.append(0)  # placeholder
-    medium_signals.append(0)  # placeholder
-
-    # 3) Long Term (≈100-200 days)
     long_signals = []
     price100ma = last['close'] - last['MA_100']
     long_signals.append(indicator_signal(price100ma))
-
     if last['MA_50'] > last['MA_100']:
         long_signals.append(1)
     else:
         long_signals.append(-1)
-
     price200ma = last['close'] - last['MA_200']
     long_signals.append(indicator_signal(price200ma))
 
-    # Trend Seeker®
     trend_seeker_signal = mock_trend_seeker(df)
 
-    # Combine all
     combined = short_signals + medium_signals + long_signals + [trend_seeker_signal]
     overall = sum(combined) / len(combined)
 
@@ -239,25 +202,16 @@ def barchart_opinion_logic(df):
         'overall_opinion': final_opinion_str
     }
 
-###############################################################################
-# 2. EXTENDED CHEAT SHEET ADDITION
-###############################################################################
-
 def approximate_price_for_ma_cross(df, short_ma_days, long_ma_days):
-    """
-    Approximate next bar's close that sets short MA == long MA.
-    """
     if len(df) < max(short_ma_days, long_ma_days):
         return None
     closes = df['close'].values
     short_old_vals = closes[-short_ma_days:]
     long_old_vals  = closes[-long_ma_days:]
-
     short_oldest = short_old_vals[0]
     long_oldest  = long_old_vals[0]
     sum_short = short_old_vals.sum() - short_oldest
     sum_long  = long_old_vals.sum()  - long_oldest
-
     n_short = short_ma_days
     n_long  = long_ma_days
     numerator = sum_long*n_short - sum_short*n_long
@@ -270,14 +224,10 @@ def approximate_price_for_ma_cross(df, short_ma_days, long_ma_days):
     return round(P, 2)
 
 def approximate_price_for_rsi(df, period, target_rsi=70):
-    """
-    Binary search approach to find next close that yields RSI ~ target_rsi.
-    """
     if len(df) < period:
         return None
     close_series = df['close']
     last_period = close_series.iloc[-period:].values
-
     lo, hi = 0, 2*close_series.iloc[-1]
     for _ in range(30):
         mid = (lo + hi)/2
@@ -295,9 +245,6 @@ def approximate_price_for_rsi(df, period, target_rsi=70):
     return None
 
 def approximate_price_for_stoch(df, period, target_stoch=80, k_smooth=3, d_smooth=3):
-    """
-    Binary search to find next close that yields raw stoch ~ target_stoch.
-    """
     if len(df) < period:
         return None
     sub = df.tail(period).copy()
@@ -306,11 +253,7 @@ def approximate_price_for_stoch(df, period, target_stoch=80, k_smooth=3, d_smoot
         mid = (lo + hi)/2
         test_bar = pd.DataFrame([{'high': mid, 'low': mid, 'close': mid}])
         test_df = pd.concat([sub, test_bar], ignore_index=True)
-
-        raw_stoch, _, _ = compute_stochastics(
-            test_df, period=period,
-            k_smooth=k_smooth, d_smooth=d_smooth
-        )
+        raw_stoch, _, _ = compute_stochastics(test_df, period=period, k_smooth=k_smooth, d_smooth=d_smooth)
         new_val = raw_stoch.iloc[-1]
         if pd.isna(new_val):
             return None
@@ -326,9 +269,6 @@ def compute_fibonacci_price(low, high, ratio):
     return round(high - ratio*(high - low), 2)
 
 def build_expanded_cheatsheet(df):
-    """
-    Compile a large table of key technical levels.
-    """
     last_close = df['close'].iloc[-1]
     prev_close = df['close'].iloc[-2] if len(df) > 1 else None
     the_high = df['high'].iloc[-1]
@@ -441,39 +381,34 @@ def build_expanded_cheatsheet(df):
     add_row(low_52,  "52-Week Low")
     add_row(rsi_20, "14 Day RSI at 20%")
 
-    def price_as_num(x):
-        return float(x['price']) if x['price'] != "N/A" else -999999999
-    cheat_sheet_sorted = sorted(cheat_sheet, key=price_as_num, reverse=True)
+    cheat_sheet_sorted = sorted(cheat_sheet, key=lambda x: float(x['price']) if x['price'] != "N/A" else -999999999, reverse=True)
     return cheat_sheet_sorted
 
 ###############################################################################
-# 3. TRADE DECISION LOGIC (Based on Rogue Radar Insights)
+# NEW S/R CLASSIFIER
 ###############################################################################
 
-def decide_trade_action(latest_price):
+def classify_sr(description):
     """
-    This logic references the Rogue Radar thresholds (from the provided
-    March 13, 2025, report).
-
-    - Key Support: 3.965
-    - Key Resistance: 4.174
-
-    If price < 3.965 => SHORT (Bearish Breakdown)
-    If price > 4.174 => LONG  (Bullish Breakout)
-    Otherwise, HOLD.
+    Simple text-based classifier for whether a line is 'Support',
+    'Resistance', or neither.
+    Feel free to refine the keywords to match your preference.
     """
-    bearish_threshold = 3.965
-    bullish_threshold = 4.174
-
-    if latest_price < bearish_threshold:
-        print("Action: Short Natural Gas Futures (Bearish Breakdown)")
-        return "SHORT"
-    elif latest_price > bullish_threshold:
-        print("Action: Long Natural Gas Futures (Bullish Breakout)")
-        return "LONG"
+    desc_lower = description.lower()
+    if ("resistance" in desc_lower or
+        "high" in desc_lower or
+        "r1" in desc_lower or
+        "r2" in desc_lower or
+        "r3" in desc_lower):
+        return "Resistance"
+    elif ("support" in desc_lower or
+          "low" in desc_lower or
+          "s1" in desc_lower or
+          "s2" in desc_lower or
+          "s3" in desc_lower):
+        return "Support"
     else:
-        print("Action: Hold (Within Neutral Range)")
-        return "HOLD"
+        return ""
 
 ###############################################################################
 # IBAPI APPLICATION
@@ -486,7 +421,7 @@ class IBApp(EWrapper, EClient):
         self.clientid = clientid
         self.historical_data = []
         self.request_completed = False
-        self.final_technical_data = None  # Store final indicators, etc.
+        self.final_technical_data = None
 
     def connect_and_run(self):
         self.connect(self.ipaddress, self.portid, self.clientid)
@@ -499,7 +434,7 @@ class IBApp(EWrapper, EClient):
         self.request_historical_data()
 
     def request_historical_data(self):
-        print("[IBApp] Requesting historical data for MES (1 year, daily bars)...")
+        print("[IBApp] Requesting historical data for Contract (1 year, daily bars)...")
         contract = self.create_mes_contract()
         self.reqHistoricalData(
             reqId=1,
@@ -516,22 +451,21 @@ class IBApp(EWrapper, EClient):
 
     def create_mes_contract(self):
         contract = Contract()
-        contract.symbol = "MHNG"    # Symbol for Natural Gas
-        contract.secType = "FUT"    # Futures
-        contract.exchange = "NYMEX" # Exchange
+        contract.symbol = "MHNG"
+        contract.secType = "FUT"
+        contract.exchange = "NYMEX"
         contract.currency = "USD"
         contract.lastTradeDateOrContractMonth = "20250425"
-        contract.localSymbol = "MNGK5"  # Local Symbol for April 2025 NG
+        contract.localSymbol = "MNGK5"
         contract.multiplier = "1000"
         return contract
 
     @iswrapper
     def historicalData(self, reqId, bar):
-        # NEW: Parse the raw IB date string to a datetime object
         parsed_dt = parse_ib_date(str(bar.date))
         self.historical_data.append({
-            'date': bar.date,               # raw string as returned by IB
-            'datetime_obj': parsed_dt,      # new field: parsed datetime
+            'date': bar.date,
+            'datetime_obj': parsed_dt,
             'open': bar.open,
             'high': bar.high,
             'low': bar.low,
@@ -543,40 +477,29 @@ class IBApp(EWrapper, EClient):
     def historicalDataEnd(self, reqId, start, end):
         print("[IBApp] Historical data download complete.")
         self.request_completed = True
-        # IMPORTANT: call process_data BEFORE disconnect
+        # DO NOT call self.classify_sr(...) here since there's no 'description'
         self.process_data()
         self.disconnect()
 
     def print_historical_data_info(self):
-        """
-        Prints the historical data range (start -> end),
-        bar size, duration, symbol, and total bars received,
-        using the 'datetime_obj' fields to show precise timestamps.
-        """
         if not self.historical_data:
             print("No historical data available.")
             return
-
-        # First and last bars from the collected data
         first_bar = self.historical_data[0]
         last_bar  = self.historical_data[-1]
-
         first_dt = first_bar['datetime_obj']
         last_dt  = last_bar['datetime_obj']
-
-        # Convert to string if they are valid datetime objects
         if isinstance(first_dt, datetime):
             start_str = first_dt.strftime("%Y-%m-%d %H:%M:%S")
         else:
             start_str = str(first_dt)
-
         if isinstance(last_dt, datetime):
             end_str = last_dt.strftime("%Y-%m-%d %H:%M:%S")
         else:
             end_str = str(last_dt)
 
-        bar_size = "1 Day"     # explicitly your current bar size
-        duration = "1 Year"    # explicitly your current duration
+        bar_size = "1 Day"
+        duration = "1 Year"
         symbol = self.create_mes_contract().symbol
 
         print("\n==============================================")
@@ -590,36 +513,22 @@ class IBApp(EWrapper, EClient):
         print("==============================================\n")
 
     def print_last_bar_timestamp(self, df):
-        """
-        Prints the timestamp of the final row (most recent bar) in df.
-        Uses df['datetime_obj'] if available, otherwise df['date'].
-        """
         if df.empty:
             print("DataFrame is empty. No last bar to show.")
             return
-
-        last_bar = df.iloc[-1]  # the last row
-        # Attempt to retrieve the parsed datetime from your stored field
+        last_bar = df.iloc[-1]
         dt_field = last_bar.get('datetime_obj', None)
-
         print("\n================== LAST BAR TIMESTAMP ==================")
         if dt_field is not None and isinstance(dt_field, datetime):
-            # We found a valid datetime object
             print(f"The last bar in the data set is from {dt_field.strftime('%Y-%m-%d %H:%M:%S')}")
         else:
-            # Fall back to the raw 'date' field
             raw_date = last_bar['date']
             print(f"The last bar in the data set has a date: {raw_date}")
         print("========================================================\n")
 
     def print_analysis_validity(self, validity_days=1):
-        """
-        Prints the time at which the analysis was performed
-        and how long the prediction or analysis is valid.
-        """
         analysis_timestamp = datetime.now()
         valid_until = analysis_timestamp + timedelta(days=validity_days)
-
         print("\n==============================================")
         print("Analysis Validity Information")
         print("==============================================")
@@ -629,10 +538,6 @@ class IBApp(EWrapper, EClient):
         print("==============================================\n")
 
     def process_data(self):
-        """
-        This method handles your final data processing and
-        prints all analysis + trade decision to the terminal.
-        """
         try:
             df = pd.DataFrame(self.historical_data)
             print(f"DEBUG: Received {len(df)} bars from IB.")
@@ -643,11 +548,11 @@ class IBApp(EWrapper, EClient):
             df.sort_values(by="date", inplace=True)
             df.reset_index(drop=True, inplace=True)
 
-            # -- Print the details of the historical data right here
             self.print_historical_data_info()
             self.print_analysis_validity(validity_days=1)
             self.print_last_bar_timestamp(df)
-            # Calculate your technical indicators
+
+            # Calculate indicators...
             df["MA_5"]   = compute_moving_average(df['close'], 5)
             df["MA_20"]  = compute_moving_average(df['close'], 20)
             df["MA_50"]  = compute_moving_average(df['close'], 50)
@@ -677,20 +582,16 @@ class IBApp(EWrapper, EClient):
             df["raw_20"], df["k_20"], df["d_20"]  = compute_stochastics(df, 20)
 
             df["atr_14"] = compute_atr(df, 14)
-
             df["rsi_9"]  = compute_rsi(df['close'], 9)
             df["rsi_14"] = compute_rsi(df['close'], 14)
             df["rsi_20"] = compute_rsi(df['close'], 20)
-
             df["pr_9"]   = compute_percent_r(df, 9)
             df["pr_14"]  = compute_percent_r(df, 14)
             df["pr_20"]  = compute_percent_r(df, 20)
-
             df["hv_20"]  = compute_historic_volatility(df['close'], 20)
-
             df["macd"]   = compute_macd(df['close'])
 
-            # Print a small snapshot of technicals
+            # Snapshot:
             last = df.iloc[-1]
             last_date = last["date"]
             def safe_round(val, decimals=2):
@@ -699,7 +600,6 @@ class IBApp(EWrapper, EClient):
             print("\n============================================================")
             print(f"Technical Analysis for MHNG - Last Date: {last_date}")
             print("============================================================\n")
-
             print("Period | Moving Average | Price Change | Percent Change | Avg Volume")
             print("-------+----------------+--------------+----------------+-----------")
             for (label, ma_col, pc_col, pct_col, vol_col) in [
@@ -747,11 +647,10 @@ class IBApp(EWrapper, EClient):
                     f"{safe_round(last['macd'],2):>9}"
                 )
 
-            # Compute standard pivot points
-            (pivot_pp, pivot_r1, pivot_r2, pivot_r3,
-             pivot_s1, pivot_s2, pivot_s3) = compute_pivots_s_r(
-                 last['high'], last['low'], last['close']
-             )
+            # Pivots:
+            (pivot_pp, pivot_r1, pivot_r2, pivot_r3, pivot_s1, pivot_s2, pivot_s3) = compute_pivots_s_r(
+                last['high'], last['low'], last['close']
+            )
             stdev_dict, avg_5day = compute_std_devs(df['close'], [1,2,3])
             p1_res = avg_5day + stdev_dict[1]
             p1_sup = avg_5day - stdev_dict[1]
@@ -770,7 +669,7 @@ class IBApp(EWrapper, EClient):
             print(f"Price 2 SD Resistance: {safe_round(p2_res,2)}   Support: {safe_round(p2_sup,2)}")
             print(f"Price 3 SD Resistance: {safe_round(p3_res,2)}   Support: {safe_round(p3_sup,2)}\n")
 
-            # Barchart Opinion
+            # Barchart Opinion:
             opinion_results = barchart_opinion_logic(df)
             print("Barchart Opinion")
             print("------------------------------------------------------------")
@@ -782,7 +681,7 @@ class IBApp(EWrapper, EClient):
             print(f"Final Opinion         : {opinion_results['overall_opinion']}")
             print("============================================================\n")
 
-            # Store final for possible AI usage
+            # Final technical snapshot
             self.final_technical_data = {
                 "last_close": last["close"],
                 "ma_20": safe_round(last["MA_20"],2),
@@ -796,7 +695,7 @@ class IBApp(EWrapper, EClient):
                 "r2": safe_round(pivot_r2,2)
             }
 
-            # Extended Trader's Cheat Sheet
+            # Normal extended cheat sheet
             cheat_sheet_rows = build_expanded_cheatsheet(df)
             print("\n====================== EXTENDED TRADER'S CHEAT SHEET ======================\n")
             print("   Price          Key Turning Point")
@@ -806,48 +705,41 @@ class IBApp(EWrapper, EClient):
                 print(f"{p_str}    {row['description']}")
             print("\n================= END OF EXTENDED TRADER'S CHEAT SHEET ===================\n")
 
-            ############################################################################
-            # >>>>  Incorporate the ROGUE RADAR logic to decide LONG / SHORT / HOLD <<<<
-            ############################################################################
-            latest_price = self.final_technical_data['last_close']
-            trade_decision = decide_trade_action(latest_price)
-
-            # Show simple example risk management using ATR
-            atr_val = self.final_technical_data['atr_14'] or 0.15  # fallback example
-            if trade_decision == "LONG":
-                stop_loss = latest_price - (1.5 * atr_val)
-                take_profit = latest_price + (3.0 * atr_val)
-            elif trade_decision == "SHORT":
-                stop_loss = latest_price + (1.5 * atr_val)
-                take_profit = latest_price - (3.0 * atr_val)
-            else:
-                stop_loss = None
-                take_profit = None
-
-            print("\n===================== TRADE DECISION (Rogue Radar Logic) =====================\n")
-            print(f"Final Decision: {trade_decision}")
-            print(f"Latest Price : {latest_price:.3f}")
-            if trade_decision in ["LONG","SHORT"]:
-                print(f"Stop-Loss    : {stop_loss:.3f}")
-                print(f"Take-Profit  : {take_profit:.3f}")
-            else:
-                print("No stop-loss / take-profit, since we are HOLDING.")
-            print("\n==============================================================================\n")
+            # NOW: print again with S/R classification
+            print("\n========== EXTENDED TRADER'S CHEAT SHEET WITH SUPPORT/RESISTANCE ==========\n")
+            print("   S/R         Price          Key Turning Point")
+            print("---------------------------------------------------------------")
+            for row in cheat_sheet_rows:
+                sr_value = classify_sr(row['description'])
+                p_str = f"{row['price']:>10}" if row['price'] != "N/A" else "       N/A"
+                print(f"{sr_value:10}  {p_str}    {row['description']}")
+            print("\n================ END OF S/R CLASSIFIED EXTENDED CHEAT SHEET ===============\n")
 
         except Exception as e:
             print("Error in process_data:", e)
             self.final_technical_data = None
 
 ###############################################################################
-#OPENAI (Optional AI Integration)
+# OPENAI INTEGRATION
 ###############################################################################
-
 def build_ai_prompt(technicals):
     prompt = f"""
-    You are an advanced trading assistant analyzing the MHNG futures contract.
+    You are an advanced trading assistant analyzing the May 2025 Natural Gas Futures contract (NGK25).
+    I have technical snapshot data including current price, change %, moving averages, stochastic, RSI, MACD,
+    and a trader’s cheat sheet with pivot points, Fibonacci retracements, and standard deviation levels.
 
-    ### Technical Data (via IBAPI for MHNG):
-    - Current MHNG Price: {technicals['last_close']}
+    Please provide:
+    - A clean summary of the current market condition,
+    - Analysis of short-term vs long-term trends,
+    - Key support/resistance zones with interpretation,
+    - Momentum indicators (Stochastic, RSI, MACD) and what they imply,
+    - A trading plan or setup idea (both scalping and swing),
+    - Any oversold/bounce potential based on the data.
+
+    Make it actionable, as if advising a trader who must decide within the next 24 hours.
+
+    ### Technical Data (via IBAPI):
+    - Current NGK25 Price: {technicals['last_close']}
     - 20-day MA: {technicals['ma_20']}, 50-day MA: {technicals['ma_50']}
     - RSI (14-day): {technicals['rsi_14']}
     - MACD: {technicals['macd']}
@@ -855,16 +747,16 @@ def build_ai_prompt(technicals):
     - Support Levels: {technicals['s1']}, {technicals['s2']}
     - Resistance Levels: {technicals['r1']}, {technicals['r2']}
 
-    ### TASK
-    1. Provide a trade recommendation (Buy/Sell/Hold).
-    2. Estimate the probability (0–100%) that MHNG will move in the recommended direction over the next 2 weeks.
-    3. Give a brief fundamental justification (based on SPY's metrics).
+    ### TASK:
+    1. Provide a trade recommendation (Buy/Sell/Hold).Identify Support & Resistance Levels.
+    2. Estimate the probability (0–100%) that NGK25 will move in the recommended direction over the next 24 Hours.
+    3. Research storage, weather, supply, demand, opec news and give a brief fundamental justification for price direction.
     4. Give a brief technical justification (RSI, MACD, S/R, etc.).
     5. Mention one macro risk that might invalidate this trade.
 
     Rules:
     - Probability must be a single integer from 40–80%.
-    - Keep your answer under 100 words total.
+    - Keep your answer under 200 words total.
     """
     return prompt
 
@@ -880,13 +772,10 @@ def get_ai_analysis(prompt):
 ###############################################################################
 # MAIN
 ###############################################################################
-
 def main():
-    # 1) Connect to IB and fetch MHNG data
     app = IBApp("127.0.0.1", 7496, clientid=1)
     app.connect_and_run()
 
-    # Wait for data retrieval or timeout
     timeout = 60
     start_time = time.time()
     while (time.time() - start_time) < timeout:
@@ -897,20 +786,14 @@ def main():
         print("[Main] Timed out waiting for historical data.")
         return
 
-    # 3) Build an AI prompt using final technical data from IB
     technicals = app.final_technical_data
     if not technicals:
         print("[Main] No final technical data found. Exiting.")
         return
 
     prompt = build_ai_prompt(technicals)
-
-    # 4) Get AI's trade recommendation
     ai_decision = get_ai_analysis(prompt)
-
-    # 5) Print AI's result to terminal
     print("AI Analysis:\n", ai_decision)
 
 if __name__ == "__main__":
     main()
-
