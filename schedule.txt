@@ -1,0 +1,9 @@
+Simplified Weekly Schedule:
+
+Day & Time (NZST)	Action
+Monday 11:00 AM–2:00 PM	Run forecasts; generate weekly directional signals.
+Tuesday 12:30 AM–1:30 AM	Final confirmation; IV check; select exact options trade.
+Tuesday 2:00 AM–2:30 AM	Enter options trade.
+Tuesday–Saturday mornings	Check forecasts and positions daily. Adjust if needed.
+Friday 3:30 AM	Monitor or close trades ahead of EIA storage report.
+Saturday by 7:30 AM	Exit open positions or allow expiry if profitable.

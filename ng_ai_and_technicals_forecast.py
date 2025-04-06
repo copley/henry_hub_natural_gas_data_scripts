@@ -4,8 +4,9 @@ import requests
 import openai
 import pandas as pd
 import numpy as np
+from tabulate import tabulate
 
-from datetime import datetime, timedelta  # <-- ALREADY IMPORTED
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
@@ -16,45 +17,27 @@ import threading
 ###############################################################################
 # LOAD ENVIRONMENT VARIABLES
 ###############################################################################
-load_dotenv()  # Loads .env file if present
+load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
 if not OPENAI_API_KEY:
     raise ValueError("Error: OPENAI_API_KEY environment variable is not set.")
-
-# Set the API key for OpenAI
 openai.api_key = OPENAI_API_KEY
 
 ###############################################################################
-# NEW HELPER FUNCTION
+# HELPER FUNCTIONS
 ###############################################################################
 
 def parse_ib_date(date_str):
-    """
-    Attempt to parse IB's date string for daily bars, e.g. "20250326".
-    We'll assume it covers the entire trading day, so we approximate
-    the bar time as 23:59:59 for daily data.
-    If we see a time portion (e.g. "YYYYMMDD HH:MM:SS"), we'll parse directly.
-    """
     if " " in date_str:
-        # Try parsing "YYYYMMDD HH:MM:SS"
         try:
             return datetime.strptime(date_str, "%Y%m%d %H:%M:%S")
         except ValueError:
             pass
-
-    # Otherwise, assume format "YYYYMMDD" for daily bars
     if len(date_str) == 8:
         dt = datetime.strptime(date_str, "%Y%m%d")
         dt = dt.replace(hour=23, minute=59, second=59)
         return dt
-
-    # Fallback: if something unexpected, just return the string
     return date_str
-
-###############################################################################
-# 1. HELPER FUNCTIONS
-###############################################################################
 
 def compute_moving_average(series, window):
     return series.rolling(window=window).mean()
@@ -122,9 +105,6 @@ def compute_pivots_s_r(H, L, C):
     return pp, r1, r2, r3, s1, s2, s3
 
 def compute_std_devs(series_close, stdev_multiplier=[1,2,3]):
-    """
-    Compute standard deviations from the last 5 bars.
-    """
     last_5 = series_close.iloc[-5:]
     avg = last_5.mean()
     diffs = last_5 - avg
@@ -154,61 +134,41 @@ def indicator_signal(value, threshold_up=0, threshold_down=0):
         return 0
 
 def barchart_opinion_logic(df):
-    """
-    Original Barchart-style logic from your code.
-    We keep it intact, only returning a final opinion at the end.
-    """
     last = df.iloc[-1]
-
-    # 1) Short Term (≈20 days)
     short_signals = []
     price20ma = last['close'] - last['MA_20']
     short_signals.append(indicator_signal(price20ma))
-
     short_slope_7 = df['close'].diff().tail(7).mean()
     short_signals.append(indicator_signal(short_slope_7))
-
-    # placeholder for Bollinger or other short-term
     short_signals.append(0)
-
-    # 20-50 day MA crossover
     if last['MA_20'] > last['MA_50']:
         short_signals.append(1)
     else:
         short_signals.append(-1)
+    short_signals.append(0)
 
-    short_signals.append(0)  # another placeholder
-
-    # 2) Medium Term (≈50 days)
     medium_signals = []
     price50ma = last['close'] - last['MA_50']
     medium_signals.append(indicator_signal(price50ma))
-
     if last['MA_20'] > last['MA_100']:
         medium_signals.append(1)
     else:
         medium_signals.append(-1)
+    medium_signals.append(0)
+    medium_signals.append(0)
 
-    medium_signals.append(0)  # placeholder
-    medium_signals.append(0)  # placeholder
-
-    # 3) Long Term (≈100-200 days)
     long_signals = []
     price100ma = last['close'] - last['MA_100']
     long_signals.append(indicator_signal(price100ma))
-
     if last['MA_50'] > last['MA_100']:
         long_signals.append(1)
     else:
         long_signals.append(-1)
-
     price200ma = last['close'] - last['MA_200']
     long_signals.append(indicator_signal(price200ma))
 
-    # Trend Seeker®
     trend_seeker_signal = mock_trend_seeker(df)
 
-    # Combine all
     combined = short_signals + medium_signals + long_signals + [trend_seeker_signal]
     overall = sum(combined) / len(combined)
 
@@ -239,25 +199,16 @@ def barchart_opinion_logic(df):
         'overall_opinion': final_opinion_str
     }
 
-###############################################################################
-# 2. EXTENDED CHEAT SHEET ADDITION
-###############################################################################
-
 def approximate_price_for_ma_cross(df, short_ma_days, long_ma_days):
-    """
-    Approximate next bar's close that sets short MA == long MA.
-    """
     if len(df) < max(short_ma_days, long_ma_days):
         return None
     closes = df['close'].values
     short_old_vals = closes[-short_ma_days:]
     long_old_vals  = closes[-long_ma_days:]
-
     short_oldest = short_old_vals[0]
     long_oldest  = long_old_vals[0]
     sum_short = short_old_vals.sum() - short_oldest
     sum_long  = long_old_vals.sum()  - long_oldest
-
     n_short = short_ma_days
     n_long  = long_ma_days
     numerator = sum_long*n_short - sum_short*n_long
@@ -270,14 +221,10 @@ def approximate_price_for_ma_cross(df, short_ma_days, long_ma_days):
     return round(P, 2)
 
 def approximate_price_for_rsi(df, period, target_rsi=70):
-    """
-    Binary search approach to find next close that yields RSI ~ target_rsi.
-    """
     if len(df) < period:
         return None
     close_series = df['close']
     last_period = close_series.iloc[-period:].values
-
     lo, hi = 0, 2*close_series.iloc[-1]
     for _ in range(30):
         mid = (lo + hi)/2
@@ -295,9 +242,6 @@ def approximate_price_for_rsi(df, period, target_rsi=70):
     return None
 
 def approximate_price_for_stoch(df, period, target_stoch=80, k_smooth=3, d_smooth=3):
-    """
-    Binary search to find next close that yields raw stoch ~ target_stoch.
-    """
     if len(df) < period:
         return None
     sub = df.tail(period).copy()
@@ -306,11 +250,7 @@ def approximate_price_for_stoch(df, period, target_stoch=80, k_smooth=3, d_smoot
         mid = (lo + hi)/2
         test_bar = pd.DataFrame([{'high': mid, 'low': mid, 'close': mid}])
         test_df = pd.concat([sub, test_bar], ignore_index=True)
-
-        raw_stoch, _, _ = compute_stochastics(
-            test_df, period=period,
-            k_smooth=k_smooth, d_smooth=d_smooth
-        )
+        raw_stoch, _, _ = compute_stochastics(test_df, period=period, k_smooth=k_smooth, d_smooth=d_smooth)
         new_val = raw_stoch.iloc[-1]
         if pd.isna(new_val):
             return None
@@ -326,9 +266,6 @@ def compute_fibonacci_price(low, high, ratio):
     return round(high - ratio*(high - low), 2)
 
 def build_expanded_cheatsheet(df):
-    """
-    Compile a large table of key technical levels.
-    """
     last_close = df['close'].iloc[-1]
     prev_close = df['close'].iloc[-2] if len(df) > 1 else None
     the_high = df['high'].iloc[-1]
@@ -361,15 +298,17 @@ def build_expanded_cheatsheet(df):
     p3_res = avg_5day + stdev_dict[3]
     p3_sup = avg_5day - stdev_dict[3]
 
-    cross_9_18 = approximate_price_for_ma_cross(df, 9, 18)
-    cross_9_40 = approximate_price_for_ma_cross(df, 9, 40)
-    cross_18_40= approximate_price_for_ma_cross(df, 18, 40)
-
+    # Call your "approximate_price_for_rsi" for the hypothetical lines:
     rsi_80 = approximate_price_for_rsi(df, 14, 80)
     rsi_70 = approximate_price_for_rsi(df, 14, 70)
     rsi_50 = approximate_price_for_rsi(df, 14, 50)
     rsi_30 = approximate_price_for_rsi(df, 14, 30)
     rsi_20 = approximate_price_for_rsi(df, 14, 20)
+
+    # The rest of your approximate / stoch lines remain the same:
+    cross_9_18 = approximate_price_for_ma_cross(df, 9, 18)
+    cross_9_40 = approximate_price_for_ma_cross(df, 9, 40)
+    cross_18_40= approximate_price_for_ma_cross(df, 18, 40)
 
     stoch_80 = approximate_price_for_stoch(df, 14, 80)
     stoch_70 = approximate_price_for_stoch(df, 14, 70)
@@ -392,88 +331,89 @@ def build_expanded_cheatsheet(df):
 
     cheat_sheet = []
 
+    # Helper to add rows with rounded price or "N/A"
     def add_row(price, desc):
         if price is None:
             cheat_sheet.append({"price": "N/A", "description": desc})
         else:
-            cheat_sheet.append({"price": round(price,2), "description": desc})
+            cheat_sheet.append({"price": round(price,3), "description": desc})
 
+    # Add all your “approximate price” lines:
     add_row(cross_18_40, "Price Crosses 18-40 Day Moving Average")
     add_row(cross_9_40,  "Price Crosses 9-40 Day Moving Average")
     add_row(cross_9_18,  "Price Crosses 9-18 Day Moving Average")
 
+    # Hypothetical RSI lines that might return N/A
     add_row(rsi_80,  "14 Day RSI at 80%")
     add_row(rsi_70,  "14 Day RSI at 70%")
-    add_row(high_52, "52-Week High")
-    add_row(high_13, "13-Week High")
-    add_row(high_1m, "1-Month High")
+    add_row(rsi_50,  "14 Day RSI at 50%")
+    add_row(rsi_30,  "14 Day RSI at 30%")
+    add_row(rsi_20,  "14 Day RSI at 20%")
+
+    # One line for the actual/current RSI:
+    real_rsi_14 = df["rsi_14"].iloc[-1]  # The actual RSI from your DataFrame
+    add_row(real_rsi_14, "14 Day RSI (Current)")
+
+    add_row(high_52,  "52-Week High")
+    add_row(high_13,  "13-Week High")
+    add_row(high_1m,  "1-Month High")
 
     add_row(stoch_80, "14-3 Day Raw Stochastic at 80%")
     add_row(fib_4w_382, "38.2% Retracement From 4 Week High")
     add_row(fib_13w_382,"38.2% Retracement From 13 Week High")
     add_row(stoch_70, "14-3 Day Raw Stochastic at 70%")
-    add_row(rsi_50, "14 Day RSI at 50%")
-    add_row(fib_4w_50, "50% Retracement From 4 Week High/Low")
-    add_row(fib_13w_50,"50% Retracement From 13 Week High/Low")
-    add_row(pivot_r3, "Pivot Point 3rd Level Resistance")
-    add_row(p3_res, "Price 3 Std Deviations Resistance")
-    add_row(pivot_r2,"Pivot Point 2nd Level Resistance")
-    add_row(p2_res, "Price 2 Std Deviations Resistance")
-    add_row(stoch_50, "14-3 Day Raw Stochastic at 50%")
-    add_row(p1_res, "Price 1 Std Deviation Resistance")
-    add_row(pivot_r1,"Pivot Point 1st Resistance Point")
-    add_row(the_high, "High")
+    # etc. (the rest of your normal lines)...
+
+    # Example of continuing with your pivot, stoch, fib lines:
+    add_row(fib_4w_50,  "50% Retracement From 4 Week High/Low")
+    add_row(fib_13w_50, "50% Retracement From 13 Week High/Low")
+    add_row(pivot_r3,   "Pivot Point 3rd Level Resistance")
+    add_row(p3_res,     "Price 3 Std Deviations Resistance")
+    add_row(pivot_r2,   "Pivot Point 2nd Level Resistance")
+    add_row(p2_res,     "Price 2 Std Deviations Resistance")
+    add_row(stoch_50,   "14-3 Day Raw Stochastic at 50%")
+    add_row(p1_res,     "Price 1 Std Deviation Resistance")
+    add_row(pivot_r1,   "Pivot Point 1st Resistance Point")
+    add_row(the_high,   "High")
     add_row(prev_close, "Previous Close")
     add_row(df['close'].iloc[-1], "Last")
-    add_row(stoch_30, "14-3 Day Raw Stochastic at 30%")
-    add_row(pivot_pp, "Pivot Point")
-    add_row(the_low, "Low")
-    add_row(p1_sup, "Price 1 Std Deviation Support")
-    add_row(pivot_s1, "Pivot Point 1st Support Point")
-    add_row(stoch_20, "14-3 Day Raw Stochastic at 20%")
-    add_row(p2_sup, "Price 2 Std Deviations Support")
-    add_row(p3_sup, "Price 3 Std Deviations Support")
-    add_row(pivot_s2, "Pivot Point 2nd Support Point")
-    add_row(low_1m, "1-Month Low")
-    add_row(low_13, "13-Week Low")
-    add_row(pivot_s3, "Pivot Point 3rd Support Point")
-    add_row(rsi_30, "14 Day RSI at 30%")
-    add_row(low_52,  "52-Week Low")
-    add_row(rsi_20, "14 Day RSI at 20%")
+    add_row(stoch_30,   "14-3 Day Raw Stochastic at 30%")
+    add_row(pivot_pp,   "Pivot Point")
+    add_row(the_low,    "Low")
+    add_row(p1_sup,     "Price 1 Std Deviation Support")
+    add_row(pivot_s1,   "Pivot Point 1st Support Point")
+    add_row(stoch_20,   "14-3 Day Raw Stochastic at 20%")
+    add_row(p2_sup,     "Price 2 Std Deviations Support")
+    add_row(p3_sup,     "Price 3 Std Deviations Support")
+    add_row(pivot_s2,   "Pivot Point 2nd Support Point")
+    add_row(low_1m,     "1-Month Low")
+    add_row(low_13,     "13-Week Low")
+    add_row(pivot_s3,   "Pivot Point 3rd Support Point")
+    add_row(rsi_30,     "14 Day RSI at 30%")
+    add_row(low_52,     "52-Week Low")
+    add_row(rsi_20,     "14 Day RSI at 20%")
 
-    def price_as_num(x):
-        return float(x['price']) if x['price'] != "N/A" else -999999999
-    cheat_sheet_sorted = sorted(cheat_sheet, key=price_as_num, reverse=True)
+    cheat_sheet_sorted = sorted(
+        cheat_sheet,
+        key=lambda x: float(x['price']) if x['price'] != "N/A" else -999999999,
+        reverse=True
+    )
     return cheat_sheet_sorted
 
 ###############################################################################
-# 3. TRADE DECISION LOGIC (Based on Rogue Radar Insights)
+# S/R CLASSIFIER
 ###############################################################################
 
-def decide_trade_action(latest_price):
-    """
-    This logic references the Rogue Radar thresholds (from the provided
-    March 13, 2025, report).
-
-    - Key Support: 3.965
-    - Key Resistance: 4.174
-
-    If price < 3.965 => SHORT (Bearish Breakdown)
-    If price > 4.174 => LONG  (Bullish Breakout)
-    Otherwise, HOLD.
-    """
-    bearish_threshold = 3.965
-    bullish_threshold = 4.174
-
-    if latest_price < bearish_threshold:
-        print("Action: Short Natural Gas Futures (Bearish Breakdown)")
-        return "SHORT"
-    elif latest_price > bullish_threshold:
-        print("Action: Long Natural Gas Futures (Bullish Breakout)")
-        return "LONG"
+def classify_sr(description):
+    desc_lower = description.lower()
+    if ("resistance" in desc_lower or "high" in desc_lower or
+        "r1" in desc_lower or "r2" in desc_lower or "r3" in desc_lower):
+        return "Resistance"
+    elif ("support" in desc_lower or "low" in desc_lower or
+          "s1" in desc_lower or "s2" in desc_lower or "s3" in desc_lower):
+        return "Support"
     else:
-        print("Action: Hold (Within Neutral Range)")
-        return "HOLD"
+        return ""
 
 ###############################################################################
 # IBAPI APPLICATION
@@ -486,7 +426,7 @@ class IBApp(EWrapper, EClient):
         self.clientid = clientid
         self.historical_data = []
         self.request_completed = False
-        self.final_technical_data = None  # Store final indicators, etc.
+        self.final_technical_data = None
 
     def connect_and_run(self):
         self.connect(self.ipaddress, self.portid, self.clientid)
@@ -499,7 +439,7 @@ class IBApp(EWrapper, EClient):
         self.request_historical_data()
 
     def request_historical_data(self):
-        print("[IBApp] Requesting historical data for MES (1 year, daily bars)...")
+        print("[IBApp] Requesting historical data for Contract (1 year, daily bars)...")
         contract = self.create_mes_contract()
         self.reqHistoricalData(
             reqId=1,
@@ -508,7 +448,7 @@ class IBApp(EWrapper, EClient):
             durationStr="1 Y",
             barSizeSetting="1 day",
             whatToShow="TRADES",
-            useRTH=1,
+            useRTH=0,
             formatDate=1,
             keepUpToDate=False,
             chartOptions=[]
@@ -516,22 +456,21 @@ class IBApp(EWrapper, EClient):
 
     def create_mes_contract(self):
         contract = Contract()
-        contract.symbol = "MHNG"    # Symbol for Natural Gas
-        contract.secType = "FUT"    # Futures
-        contract.exchange = "NYMEX" # Exchange
+        contract.symbol = "MHNG"
+        contract.secType = "FUT"
+        contract.exchange = "NYMEX"
         contract.currency = "USD"
         contract.lastTradeDateOrContractMonth = "20250425"
-        contract.localSymbol = "MNGK5"  # Local Symbol for April 2025 NG
+        contract.localSymbol = "MNGK5"
         contract.multiplier = "1000"
         return contract
 
     @iswrapper
     def historicalData(self, reqId, bar):
-        # NEW: Parse the raw IB date string to a datetime object
         parsed_dt = parse_ib_date(str(bar.date))
         self.historical_data.append({
-            'date': bar.date,               # raw string as returned by IB
-            'datetime_obj': parsed_dt,      # new field: parsed datetime
+            'date': bar.date,
+            'datetime_obj': parsed_dt,
             'open': bar.open,
             'high': bar.high,
             'low': bar.low,
@@ -543,83 +482,54 @@ class IBApp(EWrapper, EClient):
     def historicalDataEnd(self, reqId, start, end):
         print("[IBApp] Historical data download complete.")
         self.request_completed = True
-        # IMPORTANT: call process_data BEFORE disconnect
         self.process_data()
         self.disconnect()
 
     def print_historical_data_info(self):
-        """
-        Prints the historical data range (start -> end),
-        bar size, duration, symbol, and total bars received,
-        using the 'datetime_obj' fields to show precise timestamps.
-        """
         if not self.historical_data:
             print("No historical data available.")
             return
-
-        # First and last bars from the collected data
         first_bar = self.historical_data[0]
         last_bar  = self.historical_data[-1]
-
         first_dt = first_bar['datetime_obj']
         last_dt  = last_bar['datetime_obj']
 
-        # Convert to string if they are valid datetime objects
         if isinstance(first_dt, datetime):
             start_str = first_dt.strftime("%Y-%m-%d %H:%M:%S")
         else:
             start_str = str(first_dt)
-
         if isinstance(last_dt, datetime):
             end_str = last_dt.strftime("%Y-%m-%d %H:%M:%S")
         else:
             end_str = str(last_dt)
 
-        bar_size = "1 Day"     # explicitly your current bar size
-        duration = "1 Year"    # explicitly your current duration
-        symbol = self.create_mes_contract().symbol
-
         print("\n==============================================")
         print("Historical Data Set Information")
         print("==============================================")
-        print(f"Symbol             : {symbol}")
-        print(f"Data Duration      : {duration}")
-        print(f"Bar Size           : {bar_size}")
+        print(f"Symbol             : {self.create_mes_contract().symbol}")
+        print(f"Data Duration      : 1 Year")
+        print(f"Bar Size           : 1 Day")
         print(f"Date Range         : {start_str} to {end_str}")
         print(f"Total Bars Received: {len(self.historical_data)}")
         print("==============================================\n")
 
     def print_last_bar_timestamp(self, df):
-        """
-        Prints the timestamp of the final row (most recent bar) in df.
-        Uses df['datetime_obj'] if available, otherwise df['date'].
-        """
         if df.empty:
             print("DataFrame is empty. No last bar to show.")
             return
-
-        last_bar = df.iloc[-1]  # the last row
-        # Attempt to retrieve the parsed datetime from your stored field
+        last_bar = df.iloc[-1]
         dt_field = last_bar.get('datetime_obj', None)
-
         print("\n================== LAST BAR TIMESTAMP ==================")
         if dt_field is not None and isinstance(dt_field, datetime):
-            # We found a valid datetime object
             print(f"The last bar in the data set is from {dt_field.strftime('%Y-%m-%d %H:%M:%S')}")
         else:
-            # Fall back to the raw 'date' field
             raw_date = last_bar['date']
             print(f"The last bar in the data set has a date: {raw_date}")
         print("========================================================\n")
 
     def print_analysis_validity(self, validity_days=1):
-        """
-        Prints the time at which the analysis was performed
-        and how long the prediction or analysis is valid.
-        """
         analysis_timestamp = datetime.now()
         valid_until = analysis_timestamp + timedelta(days=validity_days)
-
         print("\n==============================================")
         print("Analysis Validity Information")
         print("==============================================")
@@ -629,10 +539,6 @@ class IBApp(EWrapper, EClient):
         print("==============================================\n")
 
     def process_data(self):
-        """
-        This method handles your final data processing and
-        prints all analysis + trade decision to the terminal.
-        """
         try:
             df = pd.DataFrame(self.historical_data)
             print(f"DEBUG: Received {len(df)} bars from IB.")
@@ -643,11 +549,11 @@ class IBApp(EWrapper, EClient):
             df.sort_values(by="date", inplace=True)
             df.reset_index(drop=True, inplace=True)
 
-            # -- Print the details of the historical data right here
             self.print_historical_data_info()
             self.print_analysis_validity(validity_days=1)
             self.print_last_bar_timestamp(df)
-            # Calculate your technical indicators
+
+            # Calculate indicators
             df["MA_5"]   = compute_moving_average(df['close'], 5)
             df["MA_20"]  = compute_moving_average(df['close'], 20)
             df["MA_50"]  = compute_moving_average(df['close'], 50)
@@ -672,86 +578,90 @@ class IBApp(EWrapper, EClient):
             df["vol_100"] = compute_average_volume(df['volume'], 100)
             df["vol_200"] = compute_average_volume(df['volume'], 200)
 
-            df["raw_9"], df["k_9"], df["d_9"]     = compute_stochastics(df, 9)
-            df["raw_14"], df["k_14"], df["d_14"]  = compute_stochastics(df, 14)
-            df["raw_20"], df["k_20"], df["d_20"]  = compute_stochastics(df, 20)
+            df["raw_9"],  df["k_9"],  df["d_9"]  = compute_stochastics(df, 9)
+            df["raw_14"], df["k_14"], df["d_14"] = compute_stochastics(df, 14)
+            df["raw_20"], df["k_20"], df["d_20"] = compute_stochastics(df, 20)
 
             df["atr_14"] = compute_atr(df, 14)
-
             df["rsi_9"]  = compute_rsi(df['close'], 9)
             df["rsi_14"] = compute_rsi(df['close'], 14)
             df["rsi_20"] = compute_rsi(df['close'], 20)
-
             df["pr_9"]   = compute_percent_r(df, 9)
             df["pr_14"]  = compute_percent_r(df, 14)
             df["pr_20"]  = compute_percent_r(df, 20)
-
             df["hv_20"]  = compute_historic_volatility(df['close'], 20)
-
             df["macd"]   = compute_macd(df['close'])
 
-            # Print a small snapshot of technicals
-            last = df.iloc[-1]
-            last_date = last["date"]
-            def safe_round(val, decimals=2):
+            def safe_round(val, decimals=3):
                 return round(val, decimals) if pd.notnull(val) else None
 
-            print("\n============================================================")
-            print(f"Technical Analysis for MHNG - Last Date: {last_date}")
-            print("============================================================\n")
+            # Snapshot
+            last = df.iloc[-1]
 
-            print("Period | Moving Average | Price Change | Percent Change | Avg Volume")
-            print("-------+----------------+--------------+----------------+-----------")
-            for (label, ma_col, pc_col, pct_col, vol_col) in [
+            print("\n==================== TECHNICAL ANALYSIS SNAPSHOT ====================\n")
+
+            # 1) Print a table for Period / Moving Average / Price Change / ...
+            ma_headers = ["Period", "Moving Average", "Price Change", "Percent Change", "Avg Volume"]
+            ma_data = []
+            ma_periods = [
                 ("5-Day",   'MA_5',   'pc_5',   'pct_5',   'vol_5'),
                 ("20-Day",  'MA_20',  'pc_20',  'pct_20',  'vol_20'),
                 ("50-Day",  'MA_50',  'pc_50',  'pct_50',  'vol_50'),
                 ("100-Day", 'MA_100', 'pc_100', 'pct_100', 'vol_100'),
                 ("200-Day", 'MA_200', 'pc_200', 'pct_200', 'vol_200'),
-            ]:
-                print(
-                    f"{label:7} "
-                    f"{safe_round(last[ma_col],2):>10} "
-                    f"{safe_round(last[pc_col],2):>12} "
-                    f"{safe_round(last[pct_col],2):>10}% "
-                    f"{int(safe_round(last[vol_col],0) or 0):>12}"
-                )
+            ]
+            for label, ma_col, pc_col, pct_col, vol_col in ma_periods:
+                ma_data.append([
+                    label,
+                    safe_round(last[ma_col],3),
+                    safe_round(last[pc_col],3),
+                    f"{safe_round(last[pct_col],2)}%",
+                    int(safe_round(last[vol_col],0) or 0)
+                ])
+            print(tabulate(ma_data, headers=ma_headers, tablefmt="pretty"))
 
-            print("\nPeriod  | Raw Stochastic | Stoch %K  | Stoch %D  | ATR")
-            print("--------+----------------+----------+-----------+-------")
-            for (label, rcol, kcol, dcol, atr_col) in [
-                ("9-Day",  'raw_9', 'k_9', 'd_9', 'atr_14'),
-                ("14-Day", 'raw_14','k_14','d_14','atr_14'),
-                ("20-Day", 'raw_20','k_20','d_20','atr_14'),
-            ]:
-                print(
-                    f"{label:7} "
-                    f"{safe_round(last[rcol],2):>14}% "
-                    f"{safe_round(last[kcol],2):>8}% "
-                    f"{safe_round(last[dcol],2):>8}% "
-                    f"{safe_round(last[atr_col],2):>8}"
-                )
+            # 2) Stochastics table
+            stoch_headers = ["Period", "Raw Stochastic", "Stoch %K", "Stoch %D", "ATR"]
+            stoch_data = []
+            stoch_periods = [
+                ("9-Day",  'raw_9','k_9','d_9'),
+                ("14-Day", 'raw_14','k_14','d_14'),
+                ("20-Day", 'raw_20','k_20','d_20'),
+            ]
+            for label, rcol, kcol, dcol in stoch_periods:
+                stoch_data.append([
+                    label,
+                    f"{safe_round(last[rcol],2)}%",
+                    f"{safe_round(last[kcol],2)}%",
+                    f"{safe_round(last[dcol],2)}%",
+                    safe_round(last["atr_14"],2)
+                ])
+            print("\n-- Stochastics --")
+            print(tabulate(stoch_data, headers=stoch_headers, tablefmt="pretty"))
 
-            print("\nPeriod  | Relative Strength | Percent R | Historic Vol | MACD Osc")
-            print("--------+-------------------+-----------+--------------+---------")
-            for (label, rsi_col, pr_col, hv_col) in [
-                ("9-Day",  'rsi_9',  'pr_9',  'hv_20'),
-                ("14-Day", 'rsi_14', 'pr_14', 'hv_20'),
-                ("20-Day", 'rsi_20', 'pr_20', 'hv_20'),
-            ]:
-                print(
-                    f"{label:7} "
-                    f"{safe_round(last[rsi_col],2):>17}% "
-                    f"{safe_round(last[pr_col],2):>10}% "
-                    f"{safe_round(last[hv_col],2):>12}% "
-                    f"{safe_round(last['macd'],2):>9}"
-                )
+            # 3) RSI/PercentR/HV/MACD table
+            rsi_headers = ["Period","Relative Strength","Percent R","Historic Vol","MACD Osc"]
+            rsi_data = []
+            rsi_periods = [
+                ("9-Day",  'rsi_9', 'pr_9', 'hv_20'),
+                ("14-Day", 'rsi_14','pr_14','hv_20'),
+                ("20-Day", 'rsi_20','pr_20','hv_20'),
+            ]
+            for label, rsi_col, pr_col, hv_col in rsi_periods:
+                rsi_data.append([
+                    label,
+                    f"{safe_round(last[rsi_col],2)}%",
+                    f"{safe_round(last[pr_col],2)}%",
+                    f"{safe_round(last[hv_col],2)}%",
+                    safe_round(last['macd'],2)
+                ])
+            print("\n-- RSI / %R / Vol / MACD --")
+            print(tabulate(rsi_data, headers=rsi_headers, tablefmt="pretty"))
 
-            # Compute standard pivot points
-            (pivot_pp, pivot_r1, pivot_r2, pivot_r3,
-             pivot_s1, pivot_s2, pivot_s3) = compute_pivots_s_r(
-                 last['high'], last['low'], last['close']
-             )
+            # 4) Pivot Points & SD
+            pivot_pp, pivot_r1, pivot_r2, pivot_r3, pivot_s1, pivot_s2, pivot_s3 = compute_pivots_s_r(
+                last['high'], last['low'], last['close']
+            )
             stdev_dict, avg_5day = compute_std_devs(df['close'], [1,2,3])
             p1_res = avg_5day + stdev_dict[1]
             p1_sup = avg_5day - stdev_dict[1]
@@ -760,29 +670,39 @@ class IBApp(EWrapper, EClient):
             p3_res = avg_5day + stdev_dict[3]
             p3_sup = avg_5day - stdev_dict[3]
 
-            print("\nTrader's Cheat Sheet")
-            print("-------------------")
-            print(f"Pivot Point (PP): {safe_round(pivot_pp,2)}")
-            print(f"R1: {safe_round(pivot_r1,2)}   R2: {safe_round(pivot_r2,2)}   R3: {safe_round(pivot_r3,2)}")
-            print(f"S1: {safe_round(pivot_s1,2)}   S2: {safe_round(pivot_s2,2)}   S3: {safe_round(pivot_s3,2)}\n")
-            print(f"5-Day Avg Price (for SD calc): {safe_round(avg_5day,2)}")
-            print(f"Price 1 SD Resistance: {safe_round(p1_res,2)}   Support: {safe_round(p1_sup,2)}")
-            print(f"Price 2 SD Resistance: {safe_round(p2_res,2)}   Support: {safe_round(p2_sup,2)}")
-            print(f"Price 3 SD Resistance: {safe_round(p3_res,2)}   Support: {safe_round(p3_sup,2)}\n")
+            pivot_headers = ["PP","R1","R2","R3","S1","S2","S3"]
+            pivot_data = [[
+                safe_round(pivot_pp,2),
+                safe_round(pivot_r1,2),
+                safe_round(pivot_r2,2),
+                safe_round(pivot_r3,2),
+                safe_round(pivot_s1,2),
+                safe_round(pivot_s2,2),
+                safe_round(pivot_s3,2)
+            ]]
 
-            # Barchart Opinion
+            print("\n-- Trader's Pivot Cheat Sheet --")
+            print(tabulate(pivot_data, headers=pivot_headers, tablefmt="pretty"))
+
+            print(f"\n5-Day Avg Price: {safe_round(avg_5day,2)}")
+            print(f"1 SD Res: {safe_round(p1_res,2)} / Sup: {safe_round(p1_sup,2)}")
+            print(f"2 SD Res: {safe_round(p2_res,2)} / Sup: {safe_round(p2_sup,2)}")
+            print(f"3 SD Res: {safe_round(p3_res,2)} / Sup: {safe_round(p3_sup,2)}\n")
+
+            # 5) Barchart Opinion
             opinion_results = barchart_opinion_logic(df)
-            print("Barchart Opinion")
-            print("------------------------------------------------------------")
-            print(f"Short-Term Avg Signal : {opinion_results['short_avg']}")
-            print(f"Medium-Term Avg Signal: {opinion_results['medium_avg']}")
-            print(f"Long-Term Avg Signal  : {opinion_results['long_avg']}")
-            print(f"Trend Seeker (mock)   : {opinion_results['trend_seeker_signal']}")
-            print(f"Overall Numeric Avg   : {opinion_results['overall_numeric']}")
-            print(f"Final Opinion         : {opinion_results['overall_opinion']}")
-            print("============================================================\n")
+            print("-- Barchart Opinion --")
+            bc_data = [
+                ["Short-Term Avg", opinion_results['short_avg']],
+                ["Medium-Term Avg", opinion_results['medium_avg']],
+                ["Long-Term Avg", opinion_results['long_avg']],
+                ["Trend Seeker (mock)", opinion_results['trend_seeker_signal']],
+                ["Overall Numeric Avg", opinion_results['overall_numeric']],
+                ["Final Opinion", opinion_results['overall_opinion']],
+            ]
+            print(tabulate(bc_data, tablefmt="pretty"))
 
-            # Store final for possible AI usage
+            # Final snapshot
             self.final_technical_data = {
                 "last_close": last["close"],
                 "ma_20": safe_round(last["MA_20"],2),
@@ -796,58 +716,51 @@ class IBApp(EWrapper, EClient):
                 "r2": safe_round(pivot_r2,2)
             }
 
-            # Extended Trader's Cheat Sheet
+            # 6) Extended cheat sheet (3-column style)
             cheat_sheet_rows = build_expanded_cheatsheet(df)
-            print("\n====================== EXTENDED TRADER'S CHEAT SHEET ======================\n")
-            print("   Price          Key Turning Point")
-            print("-----------------------------------------------------")
+            three_col_headers = ["Support/Resistance Levels", "Price", "Key Turning Points"]
+            three_col_data = []
             for row in cheat_sheet_rows:
-                p_str = f"{row['price']:>10}" if row['price'] != "N/A" else "       N/A"
-                print(f"{p_str}    {row['description']}")
-            print("\n================= END OF EXTENDED TRADER'S CHEAT SHEET ===================\n")
+                sr_type = classify_sr(row['description'])
+                if sr_type in ["Support","Resistance"]:
+                    left_col = row['description']
+                    mid_col  = row['price']
+                    right_col= ""
+                else:
+                    left_col = ""
+                    mid_col  = row['price']
+                    right_col= row['description']
+                three_col_data.append([left_col, mid_col, right_col])
 
-            ############################################################################
-            # >>>>  Incorporate the ROGUE RADAR logic to decide LONG / SHORT / HOLD <<<<
-            ############################################################################
-            latest_price = self.final_technical_data['last_close']
-            trade_decision = decide_trade_action(latest_price)
-
-            # Show simple example risk management using ATR
-            atr_val = self.final_technical_data['atr_14'] or 0.15  # fallback example
-            if trade_decision == "LONG":
-                stop_loss = latest_price - (1.5 * atr_val)
-                take_profit = latest_price + (3.0 * atr_val)
-            elif trade_decision == "SHORT":
-                stop_loss = latest_price + (1.5 * atr_val)
-                take_profit = latest_price - (3.0 * atr_val)
-            else:
-                stop_loss = None
-                take_profit = None
-
-            print("\n===================== TRADE DECISION (Rogue Radar Logic) =====================\n")
-            print(f"Final Decision: {trade_decision}")
-            print(f"Latest Price : {latest_price:.3f}")
-            if trade_decision in ["LONG","SHORT"]:
-                print(f"Stop-Loss    : {stop_loss:.3f}")
-                print(f"Take-Profit  : {take_profit:.3f}")
-            else:
-                print("No stop-loss / take-profit, since we are HOLDING.")
-            print("\n==============================================================================\n")
+            print("\n================== EXTENDED CHEAT SHEET (3-COLUMN STYLE) ==================\n")
+            print(tabulate(three_col_data, headers=three_col_headers, tablefmt="pretty"))
+            print("\n============ END OF 3-COLUMN EXTENDED CHEAT SHEET (BARCHART STYLE) =========\n")
 
         except Exception as e:
             print("Error in process_data:", e)
             self.final_technical_data = None
 
 ###############################################################################
-#OPENAI (Optional AI Integration)
+# OPENAI INTEGRATION
 ###############################################################################
-
 def build_ai_prompt(technicals):
     prompt = f"""
-    You are an advanced trading assistant analyzing the MHNG futures contract.
+    You are an advanced trading assistant analyzing the May 2025 Natural Gas Futures contract (NGK25).
+    I have technical snapshot data including current price, change %, moving averages, stochastic, RSI, MACD,
+    and a trader’s cheat sheet with pivot points, Fibonacci retracements, and standard deviation levels.
 
-    ### Technical Data (via IBAPI for MHNG):
-    - Current MHNG Price: {technicals['last_close']}
+    Please provide:
+    - A clean summary of the current market condition,
+    - Analysis of short-term vs long-term trends,
+    - Key support/resistance zones with interpretation,
+    - Momentum indicators (Stochastic, RSI, MACD) and what they imply,
+    - A trading plan or setup idea (both scalping and swing),
+    - Any oversold/bounce potential based on the data.
+
+    Make it actionable, as if advising a trader who must decide within the next 24 hours.
+
+    ### Technical Data (via IBAPI):
+    - Current NGK25 Price: {technicals['last_close']}
     - 20-day MA: {technicals['ma_20']}, 50-day MA: {technicals['ma_50']}
     - RSI (14-day): {technicals['rsi_14']}
     - MACD: {technicals['macd']}
@@ -855,16 +768,16 @@ def build_ai_prompt(technicals):
     - Support Levels: {technicals['s1']}, {technicals['s2']}
     - Resistance Levels: {technicals['r1']}, {technicals['r2']}
 
-    ### TASK
-    1. Provide a trade recommendation (Buy/Sell/Hold).
-    2. Estimate the probability (0–100%) that MHNG will move in the recommended direction over the next 2 weeks.
-    3. Give a brief fundamental justification (based on SPY's metrics).
+    ### TASK:
+    1. Provide a trade recommendation (Buy/Sell/Hold).Identify Support & Resistance Levels.
+    2. Estimate the probability (0–100%) that NGK25 will move in the recommended direction over the next 24 Hours.
+    3. Research storage, weather, supply, demand, opec news and give a brief fundamental justification for price direction.
     4. Give a brief technical justification (RSI, MACD, S/R, etc.).
     5. Mention one macro risk that might invalidate this trade.
 
     Rules:
     - Probability must be a single integer from 40–80%.
-    - Keep your answer under 100 words total.
+    - Keep your answer under 200 words total.
     """
     return prompt
 
@@ -880,37 +793,29 @@ def get_ai_analysis(prompt):
 ###############################################################################
 # MAIN
 ###############################################################################
-
 def main():
-    # 1) Connect to IB and fetch MHNG data
     app = IBApp("127.0.0.1", 7496, clientid=1)
     app.connect_and_run()
 
-    # Wait for data retrieval or timeout
     timeout = 60
     start_time = time.time()
     while (time.time() - start_time) < timeout:
         if app.request_completed:
             break
         time.sleep(1)
+
     if not app.request_completed:
         print("[Main] Timed out waiting for historical data.")
         return
 
-    # 3) Build an AI prompt using final technical data from IB
     technicals = app.final_technical_data
     if not technicals:
         print("[Main] No final technical data found. Exiting.")
         return
 
     prompt = build_ai_prompt(technicals)
-
-    # 4) Get AI's trade recommendation
     ai_decision = get_ai_analysis(prompt)
-
-    # 5) Print AI's result to terminal
     print("AI Analysis:\n", ai_decision)
 
 if __name__ == "__main__":
     main()
-
