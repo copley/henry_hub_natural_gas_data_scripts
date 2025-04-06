@@ -4,6 +4,7 @@ import requests
 import openai
 import pandas as pd
 import numpy as np
+from tabulate import tabulate
 
 from datetime import datetime, timedelta  # <-- ALREADY IMPORTED
 from dotenv import load_dotenv
@@ -336,7 +337,7 @@ def build_expanded_cheatsheet(df):
         if price is None:
             cheat_sheet.append({"price": "N/A", "description": desc})
         else:
-            cheat_sheet.append({"price": round(price,2), "description": desc})
+            cheat_sheet.append({"price": round(price,3), "description": desc})
 
     add_row(cross_18_40, "Price Crosses 18-40 Day Moving Average")
     add_row(cross_9_40,  "Price Crosses 9-40 Day Moving Average")
@@ -443,7 +444,7 @@ class IBApp(EWrapper, EClient):
             durationStr="1 Y",
             barSizeSetting="1 day",
             whatToShow="TRADES",
-            useRTH=1,
+            useRTH=0,
             formatDate=1,
             keepUpToDate=False,
             chartOptions=[]
@@ -594,7 +595,7 @@ class IBApp(EWrapper, EClient):
             # Snapshot:
             last = df.iloc[-1]
             last_date = last["date"]
-            def safe_round(val, decimals=2):
+            def safe_round(val, decimals=3):
                 return round(val, decimals) if pd.notnull(val) else None
 
             print("\n============================================================")
@@ -616,7 +617,30 @@ class IBApp(EWrapper, EClient):
                     f"{safe_round(last[pct_col],2):>10}% "
                     f"{int(safe_round(last[vol_col],0) or 0):>12}"
                 )
+            ##########################################################################
+            # Example: Period / Moving Average / Price Change / Percent Change / Volume
+            ##########################################################################
+            headers = ["Period", "Moving Average", "Price Change", "Percent Change", "Avg Volume"]
+            table_data = []
 
+            periods = [
+                ("5-Day",   'MA_5',   'pc_5',   'pct_5',   'vol_5'),
+                ("20-Day",  'MA_20',  'pc_20',  'pct_20',  'vol_20'),
+                ("50-Day",  'MA_50',  'pc_50',  'pct_50',  'vol_50'),
+                ("100-Day", 'MA_100', 'pc_100','pct_100', 'vol_100'),
+                ("200-Day", 'MA_200', 'pc_200','pct_200', 'vol_200'),
+            ]
+
+            for label, ma_col, pc_col, pct_col, vol_col in periods:
+                table_data.append([
+                    label,
+                    safe_round(last[ma_col], 3),
+                    safe_round(last[pc_col], 3),
+                    f"{safe_round(last[pct_col], 2)}%",
+                    int(safe_round(last[vol_col], 0) or 0)
+                ])
+
+            print(tabulate(table_data, headers=headers, tablefmt="pretty"))
             print("\nPeriod  | Raw Stochastic | Stoch %K  | Stoch %D  | ATR")
             print("--------+----------------+----------+-----------+-------")
             for (label, rcol, kcol, dcol, atr_col) in [
@@ -646,7 +670,23 @@ class IBApp(EWrapper, EClient):
                     f"{safe_round(last[hv_col],2):>12}% "
                     f"{safe_round(last['macd'],2):>9}"
                 )
+            stoch_headers = ["Period", "Raw Stochastic", "Stoch %K", "Stoch %D", "ATR"]
+            stoch_table = []
+            stoch_periods = [
+                ("9-Day",  'raw_9', 'k_9', 'd_9'),
+                ("14-Day", 'raw_14','k_14','d_14'),
+                ("20-Day", 'raw_20','k_20','d_20'),
+            ]
+            for label, rcol, kcol, dcol in stoch_periods:
+                stoch_table.append([
+                    label,
+                    f"{safe_round(last[rcol],2)}%",
+                    f"{safe_round(last[kcol],2)}%",
+                    f"{safe_round(last[dcol],2)}%",
+                    safe_round(last["atr_14"], 2)
+                ])
 
+            print(tabulate(stoch_table, headers=stoch_headers, tablefmt="pretty"))
             # Pivots:
             (pivot_pp, pivot_r1, pivot_r2, pivot_r3, pivot_s1, pivot_s2, pivot_s3) = compute_pivots_s_r(
                 last['high'], last['low'], last['close']
@@ -668,7 +708,18 @@ class IBApp(EWrapper, EClient):
             print(f"Price 1 SD Resistance: {safe_round(p1_res,2)}   Support: {safe_round(p1_sup,2)}")
             print(f"Price 2 SD Resistance: {safe_round(p2_res,2)}   Support: {safe_round(p2_sup,2)}")
             print(f"Price 3 SD Resistance: {safe_round(p3_res,2)}   Support: {safe_round(p3_sup,2)}\n")
-
+            cheat_headers = ["Pivot Point (PP)", "R1", "R2", "R3", "S1", "S2", "S3"]
+            cheat_data = [[
+                safe_round(pivot_pp,2),
+                safe_round(pivot_r1,2),
+                safe_round(pivot_r2,2),
+                safe_round(pivot_r3,2),
+                safe_round(pivot_s1,2),
+                safe_round(pivot_s2,2),
+                safe_round(pivot_s3,2),
+            ]]
+            print("\nTrader's Cheat Sheet")
+            print(tabulate(cheat_data, headers=cheat_headers, tablefmt="pretty"))
             # Barchart Opinion:
             opinion_results = barchart_opinion_logic(df)
             print("Barchart Opinion")
@@ -697,6 +748,26 @@ class IBApp(EWrapper, EClient):
 
             # Normal extended cheat sheet
             cheat_sheet_rows = build_expanded_cheatsheet(df)
+
+            three_col_headers = ["Support/Resistance Levels", "Price", "Key Turning Points"]
+            three_col_data = []
+            for row in cheat_sheet_rows:
+                sr_type = classify_sr(row['description'])
+                if sr_type in ["Support","Resistance"]:
+                    left_col = row['description']
+                    middle_col = row['price']
+                    right_col = ""
+                else:
+                    left_col = ""
+                    middle_col = row['price']
+                    right_col = row['description']
+                three_col_data.append([left_col, middle_col, right_col])
+
+            print("\n================== EXTENDED CHEAT SHEET (3-COLUMN STYLE) ==================\n")
+            print(tabulate(three_col_data, headers=three_col_headers, tablefmt="pretty"))
+            print("\n============ END OF 3-COLUMN EXTENDED CHEAT SHEET (BARCHART STYLE) =========\n")
+
+
             print("\n====================== EXTENDED TRADER'S CHEAT SHEET ======================\n")
             print("   Price          Key Turning Point")
             print("-----------------------------------------------------")
@@ -706,14 +777,43 @@ class IBApp(EWrapper, EClient):
             print("\n================= END OF EXTENDED TRADER'S CHEAT SHEET ===================\n")
 
             # NOW: print again with S/R classification
-            print("\n========== EXTENDED TRADER'S CHEAT SHEET WITH SUPPORT/RESISTANCE ==========\n")
-            print("   S/R         Price          Key Turning Point")
-            print("---------------------------------------------------------------")
+            ###############################################################################
+            # 3-COLUMN PRINT BLOCK (with improved formatting)
+            ###############################################################################
+            print("\n================== EXTENDED CHEAT SHEET (3-COLUMN STYLE) ==================\n")
+
+            # Define some column widths for nicer alignment
+            left_col_width = 28
+            price_col_width = 7
+            right_col_width = 38
+
+            # Header row
+            print(f"{'Support/Resistance Levels':<{left_col_width}}  "
+                f"{'Price':>{price_col_width}}  "
+                f"{'Key Turning Points':<{right_col_width}}")
+            print("-" * (left_col_width + price_col_width + right_col_width + 4))
+
             for row in cheat_sheet_rows:
-                sr_value = classify_sr(row['description'])
-                p_str = f"{row['price']:>10}" if row['price'] != "N/A" else "       N/A"
-                print(f"{sr_value:10}  {p_str}    {row['description']}")
-            print("\n================ END OF S/R CLASSIFIED EXTENDED CHEAT SHEET ===============\n")
+                sr_type = classify_sr(row['description'])
+                # Format the numeric price (or N/A) right-justified
+                price_str = f"{row['price']:>{price_col_width}}" if row['price'] != "N/A" else f"{'N/A':>{price_col_width}}"
+
+                # If it's Support/Resistance, place description in left col; else in right col
+                if sr_type in ["Support", "Resistance"]:
+                    left_col = row['description']
+                    right_col = ""
+                else:
+                    left_col = ""
+                    right_col = row['description']
+
+                print(
+                    f"{left_col:<{left_col_width}}  "
+                    f"{price_str}  "
+                    f"{right_col:<{right_col_width}}"
+                )
+
+            print("\n============ END OF 3-COLUMN EXTENDED CHEAT SHEET (BARCHART STYLE) =========\n")
+
 
         except Exception as e:
             print("Error in process_data:", e)
