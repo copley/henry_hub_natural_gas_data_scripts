@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 from tabulate import tabulate
 
-from datetime import datetime, timedelta  # <-- ALREADY IMPORTED
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
@@ -17,13 +17,10 @@ import threading
 ###############################################################################
 # LOAD ENVIRONMENT VARIABLES
 ###############################################################################
-load_dotenv()  # Loads .env file if present
+load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
 if not OPENAI_API_KEY:
     raise ValueError("Error: OPENAI_API_KEY environment variable is not set.")
-
-# Set the API key for OpenAI
 openai.api_key = OPENAI_API_KEY
 
 ###############################################################################
@@ -138,7 +135,6 @@ def indicator_signal(value, threshold_up=0, threshold_down=0):
 
 def barchart_opinion_logic(df):
     last = df.iloc[-1]
-
     short_signals = []
     price20ma = last['close'] - last['MA_20']
     short_signals.append(indicator_signal(price20ma))
@@ -302,15 +298,17 @@ def build_expanded_cheatsheet(df):
     p3_res = avg_5day + stdev_dict[3]
     p3_sup = avg_5day - stdev_dict[3]
 
-    cross_9_18 = approximate_price_for_ma_cross(df, 9, 18)
-    cross_9_40 = approximate_price_for_ma_cross(df, 9, 40)
-    cross_18_40= approximate_price_for_ma_cross(df, 18, 40)
-
+    # Call your "approximate_price_for_rsi" for the hypothetical lines:
     rsi_80 = approximate_price_for_rsi(df, 14, 80)
     rsi_70 = approximate_price_for_rsi(df, 14, 70)
     rsi_50 = approximate_price_for_rsi(df, 14, 50)
     rsi_30 = approximate_price_for_rsi(df, 14, 30)
     rsi_20 = approximate_price_for_rsi(df, 14, 20)
+
+    # The rest of your approximate / stoch lines remain the same:
+    cross_9_18 = approximate_price_for_ma_cross(df, 9, 18)
+    cross_9_40 = approximate_price_for_ma_cross(df, 9, 40)
+    cross_18_40= approximate_price_for_ma_cross(df, 18, 40)
 
     stoch_80 = approximate_price_for_stoch(df, 14, 80)
     stoch_70 = approximate_price_for_stoch(df, 14, 70)
@@ -333,80 +331,86 @@ def build_expanded_cheatsheet(df):
 
     cheat_sheet = []
 
+    # Helper to add rows with rounded price or "N/A"
     def add_row(price, desc):
         if price is None:
             cheat_sheet.append({"price": "N/A", "description": desc})
         else:
             cheat_sheet.append({"price": round(price,3), "description": desc})
 
+    # Add all your “approximate price” lines:
     add_row(cross_18_40, "Price Crosses 18-40 Day Moving Average")
     add_row(cross_9_40,  "Price Crosses 9-40 Day Moving Average")
     add_row(cross_9_18,  "Price Crosses 9-18 Day Moving Average")
 
+    # Hypothetical RSI lines that might return N/A
     add_row(rsi_80,  "14 Day RSI at 80%")
     add_row(rsi_70,  "14 Day RSI at 70%")
-    add_row(high_52, "52-Week High")
-    add_row(high_13, "13-Week High")
-    add_row(high_1m, "1-Month High")
+    add_row(rsi_50,  "14 Day RSI at 50%")
+    add_row(rsi_30,  "14 Day RSI at 30%")
+    add_row(rsi_20,  "14 Day RSI at 20%")
+
+    # One line for the actual/current RSI:
+    real_rsi_14 = df["rsi_14"].iloc[-1]  # The actual RSI from your DataFrame
+    add_row(real_rsi_14, "14 Day RSI (Current)")
+
+    add_row(high_52,  "52-Week High")
+    add_row(high_13,  "13-Week High")
+    add_row(high_1m,  "1-Month High")
 
     add_row(stoch_80, "14-3 Day Raw Stochastic at 80%")
     add_row(fib_4w_382, "38.2% Retracement From 4 Week High")
     add_row(fib_13w_382,"38.2% Retracement From 13 Week High")
     add_row(stoch_70, "14-3 Day Raw Stochastic at 70%")
-    add_row(rsi_50, "14 Day RSI at 50%")
-    add_row(fib_4w_50, "50% Retracement From 4 Week High/Low")
-    add_row(fib_13w_50,"50% Retracement From 13 Week High/Low")
-    add_row(pivot_r3, "Pivot Point 3rd Level Resistance")
-    add_row(p3_res, "Price 3 Std Deviations Resistance")
-    add_row(pivot_r2,"Pivot Point 2nd Level Resistance")
-    add_row(p2_res, "Price 2 Std Deviations Resistance")
-    add_row(stoch_50, "14-3 Day Raw Stochastic at 50%")
-    add_row(p1_res, "Price 1 Std Deviation Resistance")
-    add_row(pivot_r1,"Pivot Point 1st Resistance Point")
-    add_row(the_high, "High")
+    # etc. (the rest of your normal lines)...
+
+    # Example of continuing with your pivot, stoch, fib lines:
+    add_row(fib_4w_50,  "50% Retracement From 4 Week High/Low")
+    add_row(fib_13w_50, "50% Retracement From 13 Week High/Low")
+    add_row(pivot_r3,   "Pivot Point 3rd Level Resistance")
+    add_row(p3_res,     "Price 3 Std Deviations Resistance")
+    add_row(pivot_r2,   "Pivot Point 2nd Level Resistance")
+    add_row(p2_res,     "Price 2 Std Deviations Resistance")
+    add_row(stoch_50,   "14-3 Day Raw Stochastic at 50%")
+    add_row(p1_res,     "Price 1 Std Deviation Resistance")
+    add_row(pivot_r1,   "Pivot Point 1st Resistance Point")
+    add_row(the_high,   "High")
     add_row(prev_close, "Previous Close")
     add_row(df['close'].iloc[-1], "Last")
-    add_row(stoch_30, "14-3 Day Raw Stochastic at 30%")
-    add_row(pivot_pp, "Pivot Point")
-    add_row(the_low, "Low")
-    add_row(p1_sup, "Price 1 Std Deviation Support")
-    add_row(pivot_s1, "Pivot Point 1st Support Point")
-    add_row(stoch_20, "14-3 Day Raw Stochastic at 20%")
-    add_row(p2_sup, "Price 2 Std Deviations Support")
-    add_row(p3_sup, "Price 3 Std Deviations Support")
-    add_row(pivot_s2, "Pivot Point 2nd Support Point")
-    add_row(low_1m, "1-Month Low")
-    add_row(low_13, "13-Week Low")
-    add_row(pivot_s3, "Pivot Point 3rd Support Point")
-    add_row(rsi_30, "14 Day RSI at 30%")
-    add_row(low_52,  "52-Week Low")
-    add_row(rsi_20, "14 Day RSI at 20%")
+    add_row(stoch_30,   "14-3 Day Raw Stochastic at 30%")
+    add_row(pivot_pp,   "Pivot Point")
+    add_row(the_low,    "Low")
+    add_row(p1_sup,     "Price 1 Std Deviation Support")
+    add_row(pivot_s1,   "Pivot Point 1st Support Point")
+    add_row(stoch_20,   "14-3 Day Raw Stochastic at 20%")
+    add_row(p2_sup,     "Price 2 Std Deviations Support")
+    add_row(p3_sup,     "Price 3 Std Deviations Support")
+    add_row(pivot_s2,   "Pivot Point 2nd Support Point")
+    add_row(low_1m,     "1-Month Low")
+    add_row(low_13,     "13-Week Low")
+    add_row(pivot_s3,   "Pivot Point 3rd Support Point")
+    add_row(rsi_30,     "14 Day RSI at 30%")
+    add_row(low_52,     "52-Week Low")
+    add_row(rsi_20,     "14 Day RSI at 20%")
 
-    cheat_sheet_sorted = sorted(cheat_sheet, key=lambda x: float(x['price']) if x['price'] != "N/A" else -999999999, reverse=True)
+    cheat_sheet_sorted = sorted(
+        cheat_sheet,
+        key=lambda x: float(x['price']) if x['price'] != "N/A" else -999999999,
+        reverse=True
+    )
     return cheat_sheet_sorted
 
 ###############################################################################
-# NEW S/R CLASSIFIER
+# S/R CLASSIFIER
 ###############################################################################
 
 def classify_sr(description):
-    """
-    Simple text-based classifier for whether a line is 'Support',
-    'Resistance', or neither.
-    Feel free to refine the keywords to match your preference.
-    """
     desc_lower = description.lower()
-    if ("resistance" in desc_lower or
-        "high" in desc_lower or
-        "r1" in desc_lower or
-        "r2" in desc_lower or
-        "r3" in desc_lower):
+    if ("resistance" in desc_lower or "high" in desc_lower or
+        "r1" in desc_lower or "r2" in desc_lower or "r3" in desc_lower):
         return "Resistance"
-    elif ("support" in desc_lower or
-          "low" in desc_lower or
-          "s1" in desc_lower or
-          "s2" in desc_lower or
-          "s3" in desc_lower):
+    elif ("support" in desc_lower or "low" in desc_lower or
+          "s1" in desc_lower or "s2" in desc_lower or "s3" in desc_lower):
         return "Support"
     else:
         return ""
@@ -478,7 +482,6 @@ class IBApp(EWrapper, EClient):
     def historicalDataEnd(self, reqId, start, end):
         print("[IBApp] Historical data download complete.")
         self.request_completed = True
-        # DO NOT call self.classify_sr(...) here since there's no 'description'
         self.process_data()
         self.disconnect()
 
@@ -490,6 +493,7 @@ class IBApp(EWrapper, EClient):
         last_bar  = self.historical_data[-1]
         first_dt = first_bar['datetime_obj']
         last_dt  = last_bar['datetime_obj']
+
         if isinstance(first_dt, datetime):
             start_str = first_dt.strftime("%Y-%m-%d %H:%M:%S")
         else:
@@ -499,16 +503,12 @@ class IBApp(EWrapper, EClient):
         else:
             end_str = str(last_dt)
 
-        bar_size = "1 Day"
-        duration = "1 Year"
-        symbol = self.create_mes_contract().symbol
-
         print("\n==============================================")
         print("Historical Data Set Information")
         print("==============================================")
-        print(f"Symbol             : {symbol}")
-        print(f"Data Duration      : {duration}")
-        print(f"Bar Size           : {bar_size}")
+        print(f"Symbol             : {self.create_mes_contract().symbol}")
+        print(f"Data Duration      : 1 Year")
+        print(f"Bar Size           : 1 Day")
         print(f"Date Range         : {start_str} to {end_str}")
         print(f"Total Bars Received: {len(self.historical_data)}")
         print("==============================================\n")
@@ -553,7 +553,7 @@ class IBApp(EWrapper, EClient):
             self.print_analysis_validity(validity_days=1)
             self.print_last_bar_timestamp(df)
 
-            # Calculate indicators...
+            # Calculate indicators
             df["MA_5"]   = compute_moving_average(df['close'], 5)
             df["MA_20"]  = compute_moving_average(df['close'], 20)
             df["MA_50"]  = compute_moving_average(df['close'], 50)
@@ -578,9 +578,9 @@ class IBApp(EWrapper, EClient):
             df["vol_100"] = compute_average_volume(df['volume'], 100)
             df["vol_200"] = compute_average_volume(df['volume'], 200)
 
-            df["raw_9"], df["k_9"], df["d_9"]     = compute_stochastics(df, 9)
-            df["raw_14"], df["k_14"], df["d_14"]  = compute_stochastics(df, 14)
-            df["raw_20"], df["k_20"], df["d_20"]  = compute_stochastics(df, 20)
+            df["raw_9"],  df["k_9"],  df["d_9"]  = compute_stochastics(df, 9)
+            df["raw_14"], df["k_14"], df["d_14"] = compute_stochastics(df, 14)
+            df["raw_20"], df["k_20"], df["d_20"] = compute_stochastics(df, 20)
 
             df["atr_14"] = compute_atr(df, 14)
             df["rsi_9"]  = compute_rsi(df['close'], 9)
@@ -592,103 +592,74 @@ class IBApp(EWrapper, EClient):
             df["hv_20"]  = compute_historic_volatility(df['close'], 20)
             df["macd"]   = compute_macd(df['close'])
 
-            # Snapshot:
-            last = df.iloc[-1]
-            last_date = last["date"]
             def safe_round(val, decimals=3):
                 return round(val, decimals) if pd.notnull(val) else None
 
-            print("\n============================================================")
-            print(f"Technical Analysis for MHNG - Last Date: {last_date}")
-            print("============================================================\n")
-            print("Period | Moving Average | Price Change | Percent Change | Avg Volume")
-            print("-------+----------------+--------------+----------------+-----------")
-            for (label, ma_col, pc_col, pct_col, vol_col) in [
+            # Snapshot
+            last = df.iloc[-1]
+
+            print("\n==================== TECHNICAL ANALYSIS SNAPSHOT ====================\n")
+
+            # 1) Print a table for Period / Moving Average / Price Change / ...
+            ma_headers = ["Period", "Moving Average", "Price Change", "Percent Change", "Avg Volume"]
+            ma_data = []
+            ma_periods = [
                 ("5-Day",   'MA_5',   'pc_5',   'pct_5',   'vol_5'),
                 ("20-Day",  'MA_20',  'pc_20',  'pct_20',  'vol_20'),
                 ("50-Day",  'MA_50',  'pc_50',  'pct_50',  'vol_50'),
                 ("100-Day", 'MA_100', 'pc_100', 'pct_100', 'vol_100'),
                 ("200-Day", 'MA_200', 'pc_200', 'pct_200', 'vol_200'),
-            ]:
-                print(
-                    f"{label:7} "
-                    f"{safe_round(last[ma_col],2):>10} "
-                    f"{safe_round(last[pc_col],2):>12} "
-                    f"{safe_round(last[pct_col],2):>10}% "
-                    f"{int(safe_round(last[vol_col],0) or 0):>12}"
-                )
-            ##########################################################################
-            # Example: Period / Moving Average / Price Change / Percent Change / Volume
-            ##########################################################################
-            headers = ["Period", "Moving Average", "Price Change", "Percent Change", "Avg Volume"]
-            table_data = []
-
-            periods = [
-                ("5-Day",   'MA_5',   'pc_5',   'pct_5',   'vol_5'),
-                ("20-Day",  'MA_20',  'pc_20',  'pct_20',  'vol_20'),
-                ("50-Day",  'MA_50',  'pc_50',  'pct_50',  'vol_50'),
-                ("100-Day", 'MA_100', 'pc_100','pct_100', 'vol_100'),
-                ("200-Day", 'MA_200', 'pc_200','pct_200', 'vol_200'),
             ]
-
-            for label, ma_col, pc_col, pct_col, vol_col in periods:
-                table_data.append([
+            for label, ma_col, pc_col, pct_col, vol_col in ma_periods:
+                ma_data.append([
                     label,
-                    safe_round(last[ma_col], 3),
-                    safe_round(last[pc_col], 3),
-                    f"{safe_round(last[pct_col], 2)}%",
-                    int(safe_round(last[vol_col], 0) or 0)
+                    safe_round(last[ma_col],3),
+                    safe_round(last[pc_col],3),
+                    f"{safe_round(last[pct_col],2)}%",
+                    int(safe_round(last[vol_col],0) or 0)
                 ])
+            print(tabulate(ma_data, headers=ma_headers, tablefmt="pretty"))
 
-            print(tabulate(table_data, headers=headers, tablefmt="pretty"))
-            print("\nPeriod  | Raw Stochastic | Stoch %K  | Stoch %D  | ATR")
-            print("--------+----------------+----------+-----------+-------")
-            for (label, rcol, kcol, dcol, atr_col) in [
-                ("9-Day",  'raw_9', 'k_9', 'd_9', 'atr_14'),
-                ("14-Day", 'raw_14','k_14','d_14','atr_14'),
-                ("20-Day", 'raw_20','k_20','d_20','atr_14'),
-            ]:
-                print(
-                    f"{label:7} "
-                    f"{safe_round(last[rcol],2):>14}% "
-                    f"{safe_round(last[kcol],2):>8}% "
-                    f"{safe_round(last[dcol],2):>8}% "
-                    f"{safe_round(last[atr_col],2):>8}"
-                )
-
-            print("\nPeriod  | Relative Strength | Percent R | Historic Vol | MACD Osc")
-            print("--------+-------------------+-----------+--------------+---------")
-            for (label, rsi_col, pr_col, hv_col) in [
-                ("9-Day",  'rsi_9',  'pr_9',  'hv_20'),
-                ("14-Day", 'rsi_14', 'pr_14', 'hv_20'),
-                ("20-Day", 'rsi_20', 'pr_20', 'hv_20'),
-            ]:
-                print(
-                    f"{label:7} "
-                    f"{safe_round(last[rsi_col],2):>17}% "
-                    f"{safe_round(last[pr_col],2):>10}% "
-                    f"{safe_round(last[hv_col],2):>12}% "
-                    f"{safe_round(last['macd'],2):>9}"
-                )
+            # 2) Stochastics table
             stoch_headers = ["Period", "Raw Stochastic", "Stoch %K", "Stoch %D", "ATR"]
-            stoch_table = []
+            stoch_data = []
             stoch_periods = [
-                ("9-Day",  'raw_9', 'k_9', 'd_9'),
+                ("9-Day",  'raw_9','k_9','d_9'),
                 ("14-Day", 'raw_14','k_14','d_14'),
                 ("20-Day", 'raw_20','k_20','d_20'),
             ]
             for label, rcol, kcol, dcol in stoch_periods:
-                stoch_table.append([
+                stoch_data.append([
                     label,
                     f"{safe_round(last[rcol],2)}%",
                     f"{safe_round(last[kcol],2)}%",
                     f"{safe_round(last[dcol],2)}%",
-                    safe_round(last["atr_14"], 2)
+                    safe_round(last["atr_14"],2)
                 ])
+            print("\n-- Stochastics --")
+            print(tabulate(stoch_data, headers=stoch_headers, tablefmt="pretty"))
 
-            print(tabulate(stoch_table, headers=stoch_headers, tablefmt="pretty"))
-            # Pivots:
-            (pivot_pp, pivot_r1, pivot_r2, pivot_r3, pivot_s1, pivot_s2, pivot_s3) = compute_pivots_s_r(
+            # 3) RSI/PercentR/HV/MACD table
+            rsi_headers = ["Period","Relative Strength","Percent R","Historic Vol","MACD Osc"]
+            rsi_data = []
+            rsi_periods = [
+                ("9-Day",  'rsi_9', 'pr_9', 'hv_20'),
+                ("14-Day", 'rsi_14','pr_14','hv_20'),
+                ("20-Day", 'rsi_20','pr_20','hv_20'),
+            ]
+            for label, rsi_col, pr_col, hv_col in rsi_periods:
+                rsi_data.append([
+                    label,
+                    f"{safe_round(last[rsi_col],2)}%",
+                    f"{safe_round(last[pr_col],2)}%",
+                    f"{safe_round(last[hv_col],2)}%",
+                    safe_round(last['macd'],2)
+                ])
+            print("\n-- RSI / %R / Vol / MACD --")
+            print(tabulate(rsi_data, headers=rsi_headers, tablefmt="pretty"))
+
+            # 4) Pivot Points & SD
+            pivot_pp, pivot_r1, pivot_r2, pivot_r3, pivot_s1, pivot_s2, pivot_s3 = compute_pivots_s_r(
                 last['high'], last['low'], last['close']
             )
             stdev_dict, avg_5day = compute_std_devs(df['close'], [1,2,3])
@@ -699,40 +670,39 @@ class IBApp(EWrapper, EClient):
             p3_res = avg_5day + stdev_dict[3]
             p3_sup = avg_5day - stdev_dict[3]
 
-            print("\nTrader's Cheat Sheet")
-            print("-------------------")
-            print(f"Pivot Point (PP): {safe_round(pivot_pp,2)}")
-            print(f"R1: {safe_round(pivot_r1,2)}   R2: {safe_round(pivot_r2,2)}   R3: {safe_round(pivot_r3,2)}")
-            print(f"S1: {safe_round(pivot_s1,2)}   S2: {safe_round(pivot_s2,2)}   S3: {safe_round(pivot_s3,2)}\n")
-            print(f"5-Day Avg Price (for SD calc): {safe_round(avg_5day,2)}")
-            print(f"Price 1 SD Resistance: {safe_round(p1_res,2)}   Support: {safe_round(p1_sup,2)}")
-            print(f"Price 2 SD Resistance: {safe_round(p2_res,2)}   Support: {safe_round(p2_sup,2)}")
-            print(f"Price 3 SD Resistance: {safe_round(p3_res,2)}   Support: {safe_round(p3_sup,2)}\n")
-            cheat_headers = ["Pivot Point (PP)", "R1", "R2", "R3", "S1", "S2", "S3"]
-            cheat_data = [[
+            pivot_headers = ["PP","R1","R2","R3","S1","S2","S3"]
+            pivot_data = [[
                 safe_round(pivot_pp,2),
                 safe_round(pivot_r1,2),
                 safe_round(pivot_r2,2),
                 safe_round(pivot_r3,2),
                 safe_round(pivot_s1,2),
                 safe_round(pivot_s2,2),
-                safe_round(pivot_s3,2),
+                safe_round(pivot_s3,2)
             ]]
-            print("\nTrader's Cheat Sheet")
-            print(tabulate(cheat_data, headers=cheat_headers, tablefmt="pretty"))
-            # Barchart Opinion:
-            opinion_results = barchart_opinion_logic(df)
-            print("Barchart Opinion")
-            print("------------------------------------------------------------")
-            print(f"Short-Term Avg Signal : {opinion_results['short_avg']}")
-            print(f"Medium-Term Avg Signal: {opinion_results['medium_avg']}")
-            print(f"Long-Term Avg Signal  : {opinion_results['long_avg']}")
-            print(f"Trend Seeker (mock)   : {opinion_results['trend_seeker_signal']}")
-            print(f"Overall Numeric Avg   : {opinion_results['overall_numeric']}")
-            print(f"Final Opinion         : {opinion_results['overall_opinion']}")
-            print("============================================================\n")
 
-            # Final technical snapshot
+            print("\n-- Trader's Pivot Cheat Sheet --")
+            print(tabulate(pivot_data, headers=pivot_headers, tablefmt="pretty"))
+
+            print(f"\n5-Day Avg Price: {safe_round(avg_5day,2)}")
+            print(f"1 SD Res: {safe_round(p1_res,2)} / Sup: {safe_round(p1_sup,2)}")
+            print(f"2 SD Res: {safe_round(p2_res,2)} / Sup: {safe_round(p2_sup,2)}")
+            print(f"3 SD Res: {safe_round(p3_res,2)} / Sup: {safe_round(p3_sup,2)}\n")
+
+            # 5) Barchart Opinion
+            opinion_results = barchart_opinion_logic(df)
+            print("-- Barchart Opinion --")
+            bc_data = [
+                ["Short-Term Avg", opinion_results['short_avg']],
+                ["Medium-Term Avg", opinion_results['medium_avg']],
+                ["Long-Term Avg", opinion_results['long_avg']],
+                ["Trend Seeker (mock)", opinion_results['trend_seeker_signal']],
+                ["Overall Numeric Avg", opinion_results['overall_numeric']],
+                ["Final Opinion", opinion_results['overall_opinion']],
+            ]
+            print(tabulate(bc_data, tablefmt="pretty"))
+
+            # Final snapshot
             self.final_technical_data = {
                 "last_close": last["close"],
                 "ma_20": safe_round(last["MA_20"],2),
@@ -746,74 +716,25 @@ class IBApp(EWrapper, EClient):
                 "r2": safe_round(pivot_r2,2)
             }
 
-            # Normal extended cheat sheet
+            # 6) Extended cheat sheet (3-column style)
             cheat_sheet_rows = build_expanded_cheatsheet(df)
-
             three_col_headers = ["Support/Resistance Levels", "Price", "Key Turning Points"]
             three_col_data = []
             for row in cheat_sheet_rows:
                 sr_type = classify_sr(row['description'])
                 if sr_type in ["Support","Resistance"]:
                     left_col = row['description']
-                    middle_col = row['price']
-                    right_col = ""
+                    mid_col  = row['price']
+                    right_col= ""
                 else:
                     left_col = ""
-                    middle_col = row['price']
-                    right_col = row['description']
-                three_col_data.append([left_col, middle_col, right_col])
+                    mid_col  = row['price']
+                    right_col= row['description']
+                three_col_data.append([left_col, mid_col, right_col])
 
             print("\n================== EXTENDED CHEAT SHEET (3-COLUMN STYLE) ==================\n")
             print(tabulate(three_col_data, headers=three_col_headers, tablefmt="pretty"))
             print("\n============ END OF 3-COLUMN EXTENDED CHEAT SHEET (BARCHART STYLE) =========\n")
-
-
-            print("\n====================== EXTENDED TRADER'S CHEAT SHEET ======================\n")
-            print("   Price          Key Turning Point")
-            print("-----------------------------------------------------")
-            for row in cheat_sheet_rows:
-                p_str = f"{row['price']:>10}" if row['price'] != "N/A" else "       N/A"
-                print(f"{p_str}    {row['description']}")
-            print("\n================= END OF EXTENDED TRADER'S CHEAT SHEET ===================\n")
-
-            # NOW: print again with S/R classification
-            ###############################################################################
-            # 3-COLUMN PRINT BLOCK (with improved formatting)
-            ###############################################################################
-            print("\n================== EXTENDED CHEAT SHEET (3-COLUMN STYLE) ==================\n")
-
-            # Define some column widths for nicer alignment
-            left_col_width = 28
-            price_col_width = 7
-            right_col_width = 38
-
-            # Header row
-            print(f"{'Support/Resistance Levels':<{left_col_width}}  "
-                f"{'Price':>{price_col_width}}  "
-                f"{'Key Turning Points':<{right_col_width}}")
-            print("-" * (left_col_width + price_col_width + right_col_width + 4))
-
-            for row in cheat_sheet_rows:
-                sr_type = classify_sr(row['description'])
-                # Format the numeric price (or N/A) right-justified
-                price_str = f"{row['price']:>{price_col_width}}" if row['price'] != "N/A" else f"{'N/A':>{price_col_width}}"
-
-                # If it's Support/Resistance, place description in left col; else in right col
-                if sr_type in ["Support", "Resistance"]:
-                    left_col = row['description']
-                    right_col = ""
-                else:
-                    left_col = ""
-                    right_col = row['description']
-
-                print(
-                    f"{left_col:<{left_col_width}}  "
-                    f"{price_str}  "
-                    f"{right_col:<{right_col_width}}"
-                )
-
-            print("\n============ END OF 3-COLUMN EXTENDED CHEAT SHEET (BARCHART STYLE) =========\n")
-
 
         except Exception as e:
             print("Error in process_data:", e)
@@ -882,6 +803,7 @@ def main():
         if app.request_completed:
             break
         time.sleep(1)
+
     if not app.request_completed:
         print("[Main] Timed out waiting for historical data.")
         return
