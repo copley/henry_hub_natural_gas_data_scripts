@@ -104,16 +104,23 @@ def compute_pivots_s_r(H, L, C):
     s3 = L - 2*(H - pp)
     return pp, r1, r2, r3, s1, s2, s3
 
+###############################################################################
+# REPLACED THE UNUSUAL STD DEV FUNCTION WITH A 20-BAR ROLLING APPROACH
+###############################################################################
 def compute_std_devs(series_close, stdev_multiplier=[1,2,3]):
-    last_5 = series_close.iloc[-5:]
-    avg = last_5.mean()
-    diffs = last_5 - avg
-    var = np.sum(diffs**2) / (len(last_5) - 1)
-    base_stdev = np.sqrt(var)
+    # Calculate the 20-bar rolling mean and std for the close
+    rolling_mean_20 = series_close.rolling(20).mean()
+    rolling_std_20  = series_close.rolling(20).std()
+
+    # Get the latest (most recent bar) mean and std
+    last_mean_20 = rolling_mean_20.iloc[-1]
+    last_std_20  = rolling_std_20.iloc[-1]
+
     out = {}
     for m in stdev_multiplier:
-        out[m] = base_stdev * m
-    return out, avg
+        out[m] = last_std_20 * m
+
+    return out, last_mean_20
 
 def mock_trend_seeker(df):
     short_ema = df['close'].ewm(span=10).mean().iloc[-1]
@@ -220,26 +227,9 @@ def approximate_price_for_ma_cross(df, short_ma_days, long_ma_days):
         return None
     return round(P, 2)
 
-def approximate_price_for_rsi(df, period, target_rsi=70):
-    if len(df) < period:
-        return None
-    close_series = df['close']
-    last_period = close_series.iloc[-period:].values
-    lo, hi = 0, 2*close_series.iloc[-1]
-    for _ in range(30):
-        mid = (lo + hi)/2
-        test_arr = np.concatenate([last_period[1:], [mid]])
-        test_series = pd.Series(test_arr)
-        rsi_val = compute_rsi(test_series, period=period).iloc[-1]
-        if pd.isna(rsi_val):
-            return None
-        if abs(rsi_val - target_rsi) < 0.1:
-            return round(mid, 2)
-        if rsi_val > target_rsi:
-            hi = mid
-        else:
-            lo = mid
-    return None
+# ---------------------------------------
+# REMOVED "approximate_price_for_rsi" ENTIRELY
+# ---------------------------------------
 
 def approximate_price_for_stoch(df, period, target_stoch=80, k_smooth=3, d_smooth=3):
     if len(df) < period:
@@ -290,6 +280,7 @@ def build_expanded_cheatsheet(df):
         the_high, the_low, last_close
     )
 
+    # Use the new 20-bar rolling approach
     stdev_dict, avg_5day = compute_std_devs(df['close'], [1,2,3])
     p1_res = avg_5day + stdev_dict[1]
     p1_sup = avg_5day - stdev_dict[1]
@@ -298,14 +289,10 @@ def build_expanded_cheatsheet(df):
     p3_res = avg_5day + stdev_dict[3]
     p3_sup = avg_5day - stdev_dict[3]
 
-    # Call your "approximate_price_for_rsi" for the hypothetical lines:
-    rsi_80 = approximate_price_for_rsi(df, 14, 80)
-    rsi_70 = approximate_price_for_rsi(df, 14, 70)
-    rsi_50 = approximate_price_for_rsi(df, 14, 50)
-    rsi_30 = approximate_price_for_rsi(df, 14, 30)
-    rsi_20 = approximate_price_for_rsi(df, 14, 20)
+    # ---------------------------------------
+    # REMOVED THE "approximate_price_for_rsi" CALLS AND ROWS
+    # ---------------------------------------
 
-    # The rest of your approximate / stoch lines remain the same:
     cross_9_18 = approximate_price_for_ma_cross(df, 9, 18)
     cross_9_40 = approximate_price_for_ma_cross(df, 9, 40)
     cross_18_40= approximate_price_for_ma_cross(df, 18, 40)
@@ -331,27 +318,19 @@ def build_expanded_cheatsheet(df):
 
     cheat_sheet = []
 
-    # Helper to add rows with rounded price or "N/A"
     def add_row(price, desc):
         if price is None:
             cheat_sheet.append({"price": "N/A", "description": desc})
         else:
             cheat_sheet.append({"price": round(price,3), "description": desc})
 
-    # Add all your “approximate price” lines:
+    # MA crosses
     add_row(cross_18_40, "Price Crosses 18-40 Day Moving Average")
     add_row(cross_9_40,  "Price Crosses 9-40 Day Moving Average")
     add_row(cross_9_18,  "Price Crosses 9-18 Day Moving Average")
 
-    # Hypothetical RSI lines that might return N/A
-    add_row(rsi_80,  "14 Day RSI at 80%")
-    add_row(rsi_70,  "14 Day RSI at 70%")
-    add_row(rsi_50,  "14 Day RSI at 50%")
-    add_row(rsi_30,  "14 Day RSI at 30%")
-    add_row(rsi_20,  "14 Day RSI at 20%")
-
-    # One line for the actual/current RSI:
-    real_rsi_14 = df["rsi_14"].iloc[-1]  # The actual RSI from your DataFrame
+    # (We keep the real/current RSI row only)
+    real_rsi_14 = df["rsi_14"].iloc[-1]  # from DataFrame
     add_row(real_rsi_14, "14 Day RSI (Current)")
 
     add_row(high_52,  "52-Week High")
@@ -362,9 +341,7 @@ def build_expanded_cheatsheet(df):
     add_row(fib_4w_382, "38.2% Retracement From 4 Week High")
     add_row(fib_13w_382,"38.2% Retracement From 13 Week High")
     add_row(stoch_70, "14-3 Day Raw Stochastic at 70%")
-    # etc. (the rest of your normal lines)...
 
-    # Example of continuing with your pivot, stoch, fib lines:
     add_row(fib_4w_50,  "50% Retracement From 4 Week High/Low")
     add_row(fib_13w_50, "50% Retracement From 13 Week High/Low")
     add_row(pivot_r3,   "Pivot Point 3rd Level Resistance")
@@ -389,9 +366,9 @@ def build_expanded_cheatsheet(df):
     add_row(low_1m,     "1-Month Low")
     add_row(low_13,     "13-Week Low")
     add_row(pivot_s3,   "Pivot Point 3rd Support Point")
-    add_row(rsi_30,     "14 Day RSI at 30%")
+    add_row(df["rsi_14"].iloc[-1], "14 Day RSI at 30%")  # Example if you want it
     add_row(low_52,     "52-Week Low")
-    add_row(rsi_20,     "14 Day RSI at 20%")
+    # or remove the above line if you don't want a second RSI row.
 
     cheat_sheet_sorted = sorted(
         cheat_sheet,
@@ -403,7 +380,6 @@ def build_expanded_cheatsheet(df):
 ###############################################################################
 # S/R CLASSIFIER
 ###############################################################################
-
 def classify_sr(description):
     desc_lower = description.lower()
     if ("resistance" in desc_lower or "high" in desc_lower or
@@ -658,7 +634,7 @@ class IBApp(EWrapper, EClient):
             print("\n-- RSI / %R / Vol / MACD --")
             print(tabulate(rsi_data, headers=rsi_headers, tablefmt="pretty"))
 
-            # 4) Pivot Points & SD
+            # 4) Pivot Points & SD (using the new rolling-20 approach behind the scenes)
             pivot_pp, pivot_r1, pivot_r2, pivot_r3, pivot_s1, pivot_s2, pivot_s3 = compute_pivots_s_r(
                 last['high'], last['low'], last['close']
             )
@@ -769,9 +745,9 @@ def build_ai_prompt(technicals):
     - Resistance Levels: {technicals['r1']}, {technicals['r2']}
 
     ### TASK:
-    1. Provide a trade recommendation (Buy/Sell/Hold).Identify Support & Resistance Levels.
+    1. Provide a trade recommendation (Buy/Sell/Hold). Provide entry, exit and stop loss please. Identify Support & Resistance Levels.
     2. Estimate the probability (0–100%) that NGK25 will move in the recommended direction over the next 24 Hours.
-    3. Research storage, weather, supply, demand, opec news and give a brief fundamental justification for price direction.
+    3. Research storage, weather, supply, demand, OPEC news and give a brief fundamental justification for price direction.
     4. Give a brief technical justification (RSI, MACD, S/R, etc.).
     5. Mention one macro risk that might invalidate this trade.
 
