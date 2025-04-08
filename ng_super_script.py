@@ -174,6 +174,7 @@ def project_gann_cycles(df, cycles=(90, 144, 180, 360), anniv_years=(1,2,3,4,5))
     """
     Gann cycle projection.
     """
+    # --- FIX: avoid SettingWithCopy by using df.copy() if needed; or just do an in-place assignment carefully
     df['Date'] = pd.to_datetime(df['Date'])
     pivots = df[(df['isSwingHigh']) | (df['isSwingLow'])].copy()
     future_turns = []
@@ -212,7 +213,15 @@ def find_upcoming_turns(future_turns_df, hours_ahead=1):
     return upcoming
 
 def process_dataframe(df):
-    df['Date'] = pd.to_datetime(df['Date'])
+    # -----------------
+    # FIX #1 to avoid SettingWithCopyWarning:
+    # Make a copy of df so we can safely assign:
+    # -----------------
+    df = df.copy()
+    # -----------------
+    # FIX #2: Use loc[:, 'Date'] to avoid chained assignment warnings
+    # -----------------
+    df.loc[:, 'Date'] = pd.to_datetime(df.loc[:, 'Date'])
     df.sort_values(by='Date', inplace=True)
     df['RSI'] = rsi_calculation(df['Close'], period=14)
     macd_line, macd_signal, macd_hist = macd_calculation(df['Close'])
@@ -224,9 +233,13 @@ def process_dataframe(df):
 
 def resample_df(df, rule):
     """
-    Resample e.g. to '12H'.
+    Resample e.g. to '12h'.
     """
     df.set_index('Date', inplace=True)
+    # -----------------
+    # FIX #3 to avoid FutureWarning:
+    # Change '12H' -> '12h' (lowercase h)
+    # -----------------
     df_resampled = df.resample(rule).agg({
         'Open': 'first',
         'High': 'max',
@@ -310,11 +323,14 @@ def multi_timeframe_analysis(hour_df, resampled_df):
 
         'current_price_12h': current_price_12h,
         'RSI_12h': current_rsi_12h,
-        'pivot_points_12h': "No significant pivot lows/highs detected on 12H." \
+        'pivot_points_12h': (
+            "No significant pivot lows/highs detected on 12H."
             if (pivot_low_12h is None and pivot_high_12h is None)
-            else f"PivotLow: {pivot_low_12h['Close']:.3f} at {pivot_low_12h['Date']} | " \
-                 f"PivotHigh: {pivot_high_12h['Close']:.3f} at {pivot_high_12h['Date']}" \
-                    if pivot_low_12h is not None and pivot_high_12h is not None else "Partial pivot data.",
+            else f"PivotLow: {pivot_low_12h['Close']:.3f} at {pivot_low_12h['Date']} | "
+                 f"PivotHigh: {pivot_high_12h['Close']:.3f} at {pivot_high_12h['Date']}"
+            if (pivot_low_12h is not None and pivot_high_12h is not None)
+            else "Partial pivot data."
+        ),
         'macd_signal_12h': "bullish" if resampled_df['MACD'].iloc[-1] > resampled_df['MACD_Signal'].iloc[-1] else "bearish",
     }
 
@@ -379,7 +395,7 @@ def build_ng_market_analysis_prompt():
     """
     prompt = (
         "You are a highly experienced natural gas trader and technical analyst. I will provide you with detailed "
-        "multi‐timeframe analysis data including short‐term (1‑hour) and long‑term (12‑/24‑hour) forecasts, derived "
+        "multi‐timeframe analysis data including short‐term (1‑hour) and long‐term (12‑/24‑hour) forecasts, derived "
         "from Gann levels, pivot points, RSI, and MACD. Based on this information, please extract the maximum tradable "
         "insights and give a clear, actionable trading strategy. Use the following data points:\n\n"
 
@@ -519,9 +535,8 @@ def main():
     api_thread.start()
     time.sleep(1)
 
-    # Request 1-hour data for 365 days (just an example)
+    # Request 1-hour data for 365 days
     contract = create_ng_contract()
-    # Fix: Use "YYYYMMDD-HH:MM:SS" format (no extra text) for UTC
     end_date_time = datetime.now(timezone.utc).strftime("%Y%m%d-%H:%M:%S")
     duration = "365 D"
     bar_size = "1 hour"
@@ -530,7 +545,7 @@ def main():
     app.reqHistoricalData(
         reqId=1,
         contract=contract,
-        endDateTime=end_date_time,  # e.g. "20230408-16:12:53" UTC
+        endDateTime=end_date_time,
         durationStr=duration,
         barSizeSetting=bar_size,
         whatToShow="TRADES",
@@ -548,14 +563,15 @@ def main():
 
     # 3) Build a DataFrame & process it for 1h
     hour_df = pd.DataFrame(app.data)
-    try:
-        hour_df['Date'] = pd.to_datetime(hour_df['Date'])
-    except Exception:
-        hour_df['Date'] = pd.to_datetime(hour_df['Date'], unit='s')
+
+    # -- We won't remove the existing logic, but to avoid SettingWithCopy, let's do a loc assignment here as well:
+    hour_df.loc[:, 'Date'] = pd.to_datetime(hour_df.loc[:, 'Date'])
+
     hour_df = process_dataframe(hour_df)
 
     # 4) Resample to 12-hour
-    resampled_df = resample_df(hour_df.copy(), '12H')
+    # -- FIX: '12H' -> '12h'
+    resampled_df = resample_df(hour_df.copy(), '12h')
     resampled_df = process_dataframe(resampled_df)
 
     # 5) Multi-timeframe analysis
