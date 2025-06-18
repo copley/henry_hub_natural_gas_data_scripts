@@ -144,7 +144,6 @@ Volatility regime (CVOL 30‑d) rescales weights: weather weight ↑ when CVOL
 
 ## 8 | Reference Implementation (Core Function)
 
-python
 def compute_fair_value(row, coefs, wts):
     # linear components
     d_storage = coefs["sto"] * (row.surplus / 100) + coefs["sto2"] * (row.surplus / 100)**2
@@ -161,5 +160,62 @@ def compute_fair_value(row, coefs, wts):
     sub_models = np.array([linear_sum, opt_mean, ml_resid, balance_path(row)])
     return float(np.dot(wts, sub_models))
 
+## 9 | GPT Reasoning Engine
+
+The GPT module interprets:
+- Fair-value deltas and premium band regimes (noise, actionable, extreme)
+- Drivers of forecast changes (e.g. GWDD anomaly flip, LNG outage, storage shock)
+- Trade structuring logic (e.g. short NGN25 with 3:1 R/R, target 3.735, stop 3.88)
+- Chat-like feedback for traders (e.g. “This is a statistically valid short based on a +0.18¢ premium and +350 Bcf surplus”)
+
+Execution: Daily inference via OpenAI GPT-4-turbo or local LLM using prompt-injected metadata from data pipeline.
+🔹 2. Add Forecast Table Output Template
+You want GPT to emit a clean table daily like:
+
+Date	FV	Screen	Premium	Trade Bias	Target	Stop	Confidence
+Jun 18	3.735	3.845	+0.11	Short	3.70	3.88	87%
+
+Let GPT generate this on every call.
+
+🔹 3. Add Trigger-Based GPT Commentary Module
+
+## 10 | Trigger Commentary Module
+
+GPT will describe:
+- When a trigger fires (e.g. "Premium > $0.15 and CVOL > 50 → mean-reversion short bias")
+- The reasoning path behind trade bias
+- Confidence bands (e.g. “3.735 target has 75% 3-day probability”)
+- Optional narrative: "This overvaluation is primarily weather-driven but not confirmed by options-implied mean."
+
+Each commentary uses structured prompt templates, updated hourly or daily.
+🔹 4. Add a Forecast Deviation Tracker
+Have GPT report:
+
+## 11 | Deviation Monitoring
+
+Track when screen price deviates by:
+- 10–15¢: Mean-reversion potential
+- >25¢: Event-driven setup (GPT explains probable catalyst)
+- Detect when options market disagrees with ensemble FV
+🔹 5. Add Meta-Prompt for Daily Forecast Runs
+Here’s your optimized GPT prompt to run daily:
+
+
+You are a Natural Gas fair-value assistant.
+Use the ensemble model inputs below:
+- Screen price = X.XXX
+- Storage surplus = YYY Bcf
+- GWDD anomaly = Z
+- LNG feedgas = A Bcf/d
+- Dry gas prod = B Bcf/d
+- Options-implied mean = C.XXX
+- CVOL 30d = D vols
+
+1. Compute updated fair value.
+2. Calculate the premium vs. screen.
+3. Classify regime: noise / actionable / extreme.
+4. Generate table of targets + probabilities.
+5. Recommend trade (entry/target/stop/confidence).
+6. Output GPT commentary.
 
 ---
