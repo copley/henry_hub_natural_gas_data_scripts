@@ -426,3 +426,58 @@ audit_trail:
   prompt_version: "1.2‑2025‑06‑17"
   input_checksums: "<sha‑256 list>"
   model_weights_id: "SHA‑256(GPT‑config + scoring‑matrix + train‑set‑id)"
+
+
+Data types and sources used across the three YAML prompts:
+
+Weather
+14-day GWDD Trend, GWDD updates – NOAA CPC, ECMWF
+
+Regional HDD/CDD anomalies – NOAA CPC
+
+Hurricane & freeze-off risk – NHC, NWS
+
+ISO grid load anomaly – EIA, ISO APIs
+
+Supply & Grid
+U.S. Dry-Gas Production – EIA, NGI, S&P Global
+
+Cross-border flows (Mexico, Canada) – Genscape
+
+Power-burn, Gas-to-coal switching thresholds – PointLogic, ICE coal swaps
+
+LNG & Storage
+LNG Feed-gas volumes – Genscape, NGI
+
+Real-time LNG vessel tracking – Kpler, AIS
+
+Net storage injection/withdrawal – EIA (Thursday report)
+
+EU storage level, TTF-HH spread – AGSI+, ICE
+
+Asian JKM-HH spread – Platts
+
+Sentiment & Structure
+CFTC COT data – CFTC
+
+CME Open Interest (OI) – CME
+
+Options IV skew & OI by strike – IBKR, CME
+
+Macro & Cross-Market
+Dollar Index (DXY), Fed Funds Futures – ICE, CME
+
+Brent/WTI correlation – ICE
+
+Coal swap vs NG spot – ICE
+
+Econoday calendar – Econoday
+
+DOE/FERC LNG headlines – RSS, manual
+
+Technical & Execution
+OHLCV, DOM, iceberg, VWAP bands, RSI, Fib levels – IBKR API, structured CSV, JSON
+
+Realized volatility, Gamma-wall proximity – Derived internally via IBKR + CME data
+
+Each data feed has specific resolution (tick, sub-second, hourly, daily, etc.), and most are from public agencies (NOAA, EIA, NHC), energy intelligence providers (Genscape, Platts, NGI), exchanges (CME, ICE), or brokers (IBKR).
