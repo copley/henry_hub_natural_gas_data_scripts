@@ -481,3 +481,39 @@ OHLCV, DOM, iceberg, VWAP bands, RSI, Fib levels – IBKR API, structured CSV, J
 Realized volatility, Gamma-wall proximity – Derived internally via IBKR + CME data
 
 Each data feed has specific resolution (tick, sub-second, hourly, daily, etc.), and most are from public agencies (NOAA, EIA, NHC), energy intelligence providers (Genscape, Platts, NGI), exchanges (CME, ICE), or brokers (IBKR).
+
+✅ Key Timestamps in the Forecasting Prompt System
+Field	What It Represents
+Validation_Timestamp	🕓 The exact time the forecast was issued — in ET and UTC
+timeframe (in each prompt)	🗓 The time range the forecast applies to (e.g., Mon 00:00 → Fri 16:00 ET for weekly)
+Hold_Horizon (intraday only)	⏱ Max duration the intraday forecast is valid for (e.g., "≤ 6h")
+Live_Trigger_Alerts / Triggers_Fired	⚡ Timestamped signals (like DOM imbalance, GWDD spike) — used for execution timing
+Session_Event_Risk	📅 Scheduled calendar events (e.g., EIA, FOMC) in ET, which can shift forecast bias
+(optional) Valid_From / Valid_To	🧭 Implied or calculated from the above, can be added to clarify duration boundaries
+
+🧠 How to Explain It Simply
+"Each forecast is issued with a Validation_Timestamp in Eastern Time (ET), which anchors when it was generated. From there, each layer (weekly, daily, intraday) has a defined time window that it's valid for. All times — even event risks and triggers — are in ET to match the NYMEX trading calendar and US data release schedule."
+
+🧩 Example:
+Weekly Forecast
+
+Validation_Timestamp: 2025-06-18T11:15:00-04:00
+
+Valid from: Monday 00:00 ET
+
+Valid to: Friday 16:00 ET
+
+Pre-Market
+
+Validation_Timestamp: 2025-06-18T08:30:00-04:00
+
+Valid until: Same day close (16:00 ET)
+
+Intraday
+
+Validation_Timestamp: 2025-06-18T11:20:00-04:00
+
+Hold_Horizon: ≤ 6h
+
+Valid until: ~17:20 ET
+
