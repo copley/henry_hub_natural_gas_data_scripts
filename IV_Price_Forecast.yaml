@@ -1,0 +1,165 @@
+Please create a price forecast for me for the NG Futures contract using the framework below, use a dates table and prices and probabilities in order to show me the forecast you create, using, 
+
+# Systematic Valuation Framework for Henry Hub Natural‑Gas Futures
+
+*Prepared June 2025 – v1.0*
+
+---
+
+## 1 | Objective
+
+Provide an end‑to‑end, code‑ready framework that produces a **daily fair‑value** for the prompt‑month Henry Hub futures contract (NG<front>), surfaces the screen‑minus‑model premium, and supplies actionable diagnostics (war‑risk, liquidity, storage scarcity) for traders and risk managers.
+
+---
+
+## 2 | High‑Level Architecture
+
+mermaid
+flowchart LR
+    subgraph Data Layer
+        A1[EIA, NOAA, PointLogic, CFTC, CME]
+        A2[ICE basis, ISO power, DXY]
+    end
+    subgraph ETL & Feature Eng
+        B1[Ingest & QC]
+        B2[Lag Alignment]
+        B3[Feature Derivation]
+    end
+    subgraph Models
+        C1[Storage Regression]
+        C2[Balance‑Path Simulator]
+        C3[Weather Elasticity]
+        C4[LNG & Trade‑Flow Factor]
+        C5[Options‑Implied Mean]
+        C6[ML Residual Learner]
+    end
+    subgraph Ensemble
+        D1[Bayesian Weighting]
+    end
+    subgraph Outputs
+        E1[Fair‑Value Time Series]
+        E2[Premium Diagnostics]
+        E3[Slack / Telegram Alerts]
+    end
+
+    A1 & A2 --> B1 --> B2 --> B3 --> C1 & C2 & C3 & C4 & C5 & C6 --> D1 --> E1 --> E2 --> E3
+
+
+* **Orchestration:** Airflow 5‑min DAG  
+* **Languages:** Python 3.11, pandas, statsmodels, xgboost, pymc, sqlalchemy  
+* **Data Store:** TimescaleDB for time‑series; S3 for raw snapshots  
+* **Dashboards:** Grafana + Plotly Dash
+
+---
+
+## 3 | Data Specification
+
+| Feed | Endpoint/API | Cadence | Latency SLA | Key Fields |
+|------|--------------|---------|-------------|------------|
+| EIA Weekly Storage | api.eia.gov/NGWSTUS1 | Thu 10:30 ET | 30 s | Working gas, 5‑yr avg |
+| Pipeline Flow (LNG, Dry Prod) | PointLogic RT | 10 min | 3 min | Bcf/d by facility/pipe |
+| NOAA Degree‑Days | CPC FTP degree_days.txt | 00 & 12 UTC | 20 min | HDD, CDD, GWDD |
+| EIA‑930 Power Burn | api.eia.gov/series/series_id=EBA...NG | 15 min | 5 min | NG MWh by ISO |
+| CFTC COT | ftp.cftc.gov | Fri 15:30 ET | 15 s | Managed‑money longs/shorts |
+| CME CVOL & Options | CME FIX 4.4 | 1 min | 2 s | IV surface, OI |
+| ICE Basis Futures | ICE DataConnect | Daily | EOD | Z2, Z3, Z6 close |
+| Macro | ICE DXY, CL front month | 1 min | 1 s | Index px |
+
+All raw pulls stored in raw_ingest.<feed>, then rolled to 5‑min bars in clean.<topic>.
+
+---
+
+## 4 | Model Blocks
+
+### 4.1 Storage‑Differential Regression  
+*Regression:*  
+\[
+P_t = eta_0 + eta_1 \left(rac{S_t - ar S_{5y}}{100}
+ight) + eta_2 \left(rac{S_t - ar S_{5y}}{100}
+ight)^2 + arepsilon_t
+\]  
+*Elasticity initialisation:* \(eta_1 = -0.035\), \(eta_2 = -0.003\). Re‑fit quarterly (rolling 3 yrs).
+
+### 4.2 Balance‑Path Simulator  
+1. Estimate daily supply/demand flows through Oct 31.  
+2. Iterate storage path; find price that sets EOE_storage ∈ [3.2, 3.9] Tcf using cost‑of‑carry:
+\[
+P_{prompt} = P_{strip} - rac{c_{carry} + 	ext{fuel loss}}{(1+r)^{T/365}}
+\]
+
+### 4.3 Weather Elasticity Module  
+\[
+\Delta P_{	ext{weather}} = \gamma \cdot 	ext{GWDD}_{anom}/10
+\]  
+Base \(\gamma = 0.12\); scaled by α(t) = 1 - 0.4·surplus_sigma.  
+
+### 4.4 LNG & Trade‑Flow Factor  
+\[
+\Delta P_{	ext{LNG}} = 0.08 	imes (	ext{Feedgas} - 12.7)
+\]
+
+### 4.5 Options‑Implied Mean  
+*Risk‑neutral expectation* via Carr‑Madan:
+\[
+\mathbb{E}[P] = \sum_{k} rac{\Delta K}{K^2} C(K)
+\]
+
+### 4.6 ML Residual Learner  
+*Features*: rig count lag 6 wk, frac‑spread, ENSO, MJO phase, DOE propane, CVOL, skew.  
+*Model*: XGBoost max_depth=4, n_estimators=400, re‑fit monthly.  
+*Target*: residual \(P_{	ext{screen}} - P_{	ext{linear\_sum}}\).
+
+---
+
+## 5 | Bayesian Ensemble
+
+\[
+w_i \sim 	ext{Dirichlet}(lpha_i);\quad lpha_i = 1 / 	ext{MAPE}_i (60 d)
+\]
+\[
+	ext{Fair‑Value}_t = \sum_i w_{i,t}\, M_{i,t}
+\]
+
+Volatility regime (CVOL 30‑d) rescales weights: weather weight ↑ when CVOL > 45 vol; storage weight ↓ when surplus > 300 Bcf.
+
+---
+
+## 6 | Premium Decomposition & Alerts
+
+| Premium | Formula | Threshold | Action |
+|---------|---------|-----------|--------|
+| War‑Risk | \(P_{screen} - P_{FV}\) | > $0.25 & TTF–HH > $10 | Alert + consider short |
+| Spec‑Squeeze | CFTC net < –2 σ **AND** CVOL +10 vol | Alert + lower short exposure |
+| Scarcity | EOE storage < 3.2 Tcf | Go long outrights / Oct‑Jan spreads |
+
+---
+
+## 7 | Back‑Test & Validation
+
+* Walk‑forward (2017→2024)  
+* Metrics: RMSE, Directional Accuracy, % trades with > 10 ¢ edge.  
+* Current v1.0: RMSE 9 ¢, DA 68 %, hit‑rate 75 %.
+
+---
+
+## 8 | Reference Implementation (Core Function)
+
+python
+def compute_fair_value(row, coefs, wts):
+    # linear components
+    d_storage = coefs["sto"] * (row.surplus / 100) + coefs["sto2"] * (row.surplus / 100)**2
+    d_weather = coefs["wx"]  * (1 - 0.4*row.surplus/200) * (row.gwdd_anom/10)
+    d_lng     = coefs["lng"] * (row.feedgas - 12.7)
+    d_prod    = coefs["prod"]* (row.dry_prod - 105)
+
+    linear_sum = 3.60 + d_storage + d_weather + d_lng + d_prod
+
+    # options mean & ML residual
+    opt_mean  = row.opt_mean
+    ml_resid  = ml_model.predict(row[ml_feats])
+
+    sub_models = np.array([linear_sum, opt_mean, ml_resid, balance_path(row)])
+    return float(np.dot(wts, sub_models))
+
+
+---
