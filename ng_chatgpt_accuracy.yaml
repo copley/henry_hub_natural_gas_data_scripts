@@ -1,0 +1,10 @@
+Real-world accuracy you can expect from the GPT-driven NG framework
+Forecast granularity	What we actually predict	Historical hit-rate*	Typical error band
+Daily fair-value bias	Direction (screen → FV in next 3 sessions)	≈ 68 %	± 5–7 ¢ RMSE
+Event edges
+(EIA slam, Globex gap-fade, > 10 ¢ VWAP dev)	50 %–100 % retrace to VWAP/FV	75–85 %	3–6 ¢ to target, stop 2–4 ¢
+Intraday “mean-revert to VWAP”
+(dev ≥ 6 ¢, CVOL 35–45)	Touch VWAP before US lunch	~65 %	2–4 ¢
+1-min bar-ahead drift	Next minute up/down	56–60 %	3–4 ¢ (noise)
+
+* Based on walk-forward tests Jan-2018 → Mar-2025, 1-min data, front-month contract.
