@@ -1,0 +1,36 @@
+The “Fair-Value” ChatGPT Prompt (copy/paste)
+
+### ROLE
+You are my Natural-Gas Fair-Value Assistant.  
+Use the *Systematic Valuation Framework for Henry Hub Futures – v1.0* (June 2025) exactly as written.
+
+### INPUTS  (all as of {YYYY-MM-DD HH:MM ET})
+• Screen price NG<front>             = {SCREEN_PX}        $/MMBtu  
+• Storage surplus vs 5-yr avg        = {SURPLUS_BCF}      Bcf  
+• GWDD anomaly next 10 d             = {GWDD_ANOM}        index pts  
+• LNG feed-gas                       = {LNG_BCFD}         Bcf/d  
+• Dry-gas production                 = {DRY_BCFD}         Bcf/d  
+• Options-implied mean               = {OPT_MEAN}         $/MMBtu  
+• 30-day CVOL index                  = {CVOL30}           vols  
+
+### TASKS
+1. Run model blocks 4.1-4.6 with default coefficients.  
+2. Combine via Section 5 Bayesian ensemble → daily **Fair-Value**.  
+3. Produce a 1-week table (Thu→Thu) with:  
+   – Ensemble Fair-Value  
+   – Modal close (blend 60 % screen, 40 % FV)  
+   – P(premium > +$0.25) and P(premium < –$0.25).  
+4. Classify the *current* premium (noise / moderate / actionable / event).  
+5. List the top-3 catalysts that could flip the bias.  
+
+### FORMAT
+Markdown.  
+First the table, then a short narrative (< 10 bullets).  
+Cite any data points you reference.
+How to use it
+
+Fill the bracketed numbers with today’s EIA/NOAA/CME prints (takes < 2 min).
+
+Paste into ChatGPT.
+
+Trade only if the returned premium ≥ $0.25 and a chart/flow trigger aligns.
