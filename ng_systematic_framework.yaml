@@ -1,0 +1,125 @@
+ng_systematic_framework:
+  version: "v1.0 — June 2025"
+  objective: >
+    Provide an end-to-end, code-ready framework that produces a daily fair-value
+    for the prompt-month Henry Hub futures contract (NG<front>), surfaces the
+    screen-minus-model premium, and supplies actionable diagnostics
+    (war-risk, liquidity, storage scarcity) for traders and risk managers.
+
+  orchestration:
+    dag: "Airflow 5-min"
+    languages: ["Python 3.11", "pandas", "statsmodels", "xgboost", "pymc", "sqlalchemy"]
+    storage: {timescaledb: "time-series", s3: "raw snapshots"}
+    dashboards: ["Grafana", "Plotly-Dash"]
+
+  data_specification:
+    feeds:
+      - {feed: "EIA Weekly Storage",       endpoint: "api.eia.gov/NGWSTUS1",          cadence: "Thu 10:30 ET", latency: "30 s",   fields: ["Working gas", "5-yr avg"]}
+      - {feed: "Pipeline Flow",            endpoint: "PointLogic RT",                cadence: "10 min",       latency: "3 min",  fields: ["Bcf/d by facility/pipe"]}
+      - {feed: "NOAA Degree-Days",         endpoint: "CPC FTP file",                 cadence: "00 & 12 UTC",  latency: "20 min", fields: ["HDD", "CDD", "GWDD"]}
+      - {feed: "EIA-930 Power Burn",       endpoint: "api.eia.gov/series...",        cadence: "15 min",       latency: "5 min",  fields: ["NG MWh by ISO"]}
+      - {feed: "CFTC COT",                 endpoint: "ftp.cftc.gov",                 cadence: "Fri 15:30 ET", latency: "15 s",   fields: ["Managed-money longs/shorts"]}
+      - {feed: "CME CVOL & Options",       endpoint: "CME FIX 4.4",                  cadence: "1 min",        latency: "2 s",    fields: ["IV surface", "OI"]}
+      - {feed: "ICE Basis Futures",        endpoint: "ICE DataConnect",              cadence: "Daily",        latency: "EOD",    fields: ["Z2", "Z3", "Z6 close"]}
+      - {feed: "Macro",                    endpoint: "ICE DXY / CL front",           cadence: "1 min",        latency: "1 s",    fields: ["Index px"]}
+      - {feed: "CME Settle CSV",           endpoint: "ftp.cmegroup.com/pub/settle",  cadence: "Daily",        latency: "~17:20 ET", fields: ["Settle"]}
+      - {feed: "Globex Re-open Quote",     endpoint: "CME top-of-book (delayed 10 m)", cadence: "Daily",    latency: "~18:10 ET", fields: ["Open price"]}
+      - {feed: "Intraday Trades",          endpoint: "IBKR delayed 1-min",           cadence: "1 min",        latency: "10 m",   fields: ["OHLCV (for VWAP)"]}
+
+    processing_notes: >
+      All raw pulls land in `raw_ingest.<feed>` then roll to 5-min bars
+      in `clean.<topic>`.  Extra intraday tape (1-min) is stored for
+      VWAP-calc and Globex-gap logic.
+
+  model_blocks:
+    4.1_Storage_Differential_Regression: |
+      P_t = β₀ + β₁·((S_t − S̄₅y)/100) + β₂·((S_t − S̄₅y)/100)² + ε_t
+      β₁ init = −0.035 ; β₂ init = −0.003 ; re-fit quarterly (rolling 3y)
+    4.2_Balance_Path_Simulator: >
+      Iterate daily balance to Oct 31; solve prompt price such that
+      EOE storage ∈ [3.2, 3.9] Tcf after cost-of-carry.
+    4.3_Weather_Elasticity: ΔP_weather = γ·GWDD_anom/10 ; γ₀ = 0.12,
+      scaled by α(t)=1 − 0.4·surplus_sigma.
+    4.4_LNG_Trade_Flow: ΔP_LNG = 0.08·(Feedgas − 12.7)
+    4.5_Options_Implied_Mean: risk-neutral expectation via Carr-Madan
+    4.6_ML_Residual_Learner: XGBoost (400 trees, depth 4) on residuals
+    4.7_Globex_Gap_Detector: |
+      gap_1800 = Price_18:00 − Settle_17:00
+      flag = |gap_1800| ≥ 0.06 ($)
+    4.8_VWAP_Deviation_Gauge: |
+      vwap_diff = Screen − VWAP_session
+      flag = "overvalued" if vwap_diff ≥ +0.10
+           = "undervalued" if vwap_diff ≤ −0.10
+           = "neutral" otherwise
+
+  ensemble:
+    weighting: "Dirichlet (α_i = 1 / MAPE_i_60d)"
+    volatility_rescale: |
+      if CVOL_30d > 45 → weight_weather↑
+      if storage_surplus > 300 Bcf → weight_storage↓
+
+  outputs:
+    daily_table_columns:
+      - Date
+      - Fair_Value
+      - Screen
+      - Premium
+      - Globex_Gap_¢
+      - VWAP_Deviation_¢
+      - Trade_Bias
+      - Target
+      - Stop
+      - Confidence
+    alerts:
+      war_risk:   "screen−FV > 0.25 AND TTF−HH > $10"
+      spec_squeeze: "CFTC_net < −2σ AND CVOL+10 vol"
+      scarcity:  "EOE_storage < 3.2 Tcf"
+
+  backtest_validation:
+    window: "2017-01 → 2024-12"
+    metrics: {RMSE_cents: 9, Directional_Accuracy: 68 %, Hit_Rate_>10c_edge: 75 %}
+
+  gpt_reasoning_engine:
+    tasks:
+      - "Interpret fair-value deltas / regime"
+      - "Explain driver shifts (GWDD, LNG, storage)"
+      - "Generate trade card (entry, target, stop, RR)"
+      - "Add Globex gap & VWAP commentary"
+    output_schema: |
+      1. Table (see Outputs.daily_table_columns)
+      2. Narrative commentary with triggers & confidence bands
+
+  daily_meta_prompt: |
+    You are a Natural Gas fair-value assistant.
+    Inputs:
+      Screen          = X.XXX
+      Settle_1700     = S.SETTLE
+      Open_1800       = S.OPEN_GLOBEX
+      VWAP_session    = S.VWAP
+      Storage_surplus = YYY Bcf
+      GWDD_anom       = Z
+      LNG_feedgas     = A Bcf/d
+      Dry_gas_prod    = B Bcf/d
+      Opt_mean        = C.XXX
+      CVOL_30d        = D vols
+    Steps:
+      1. Compute fair value via ensemble.
+      2. Premium = Screen − FV.
+      3. Globex_gap = Open_1800 − Settle_1700.
+      4. VWAP_dev  = Screen − VWAP_session.
+      5. Classify regime (noise / actionable / extreme).
+      6. Populate daily table + probabilities.
+      7. Generate trade recommendation & GPT commentary.
+
+  reference_core_function: |
+    def compute_fair_value(row, coefs, wts):
+        d_storage = coefs['sto']  * (row.surplus/100) \
+                  + coefs['sto2'] * (row.surplus/100)**2
+        d_weather = coefs['wx']   * (1-0.4*row.surplus/200) * (row.gwdd_anom/10)
+        d_lng     = coefs['lng']  * (row.feedgas - 12.7)
+        d_prod    = coefs['prod'] * (row.dry_prod - 105)
+        linear    = 3.60 + d_storage + d_weather + d_lng + d_prod
+        opt_mean  = row.opt_mean
+        ml_resid  = ml_model.predict(row[ml_feats])
+        submods   = np.array([linear, opt_mean, ml_resid, balance_path(row)])
+        return float(np.dot(wts, submods))
