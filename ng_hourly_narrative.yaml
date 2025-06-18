@@ -1,0 +1,54 @@
+ng_hourly_narrative:
+  day_1_monday:
+    18:00: "CME Globex reopens; light liquidity invites directional moves. Initial sellers test downside liquidity after weekend model updates."
+    19:00: "Early momentum forms. Large orders fade Friday’s settlement. Short-term algos active."
+    20:00: "Market settles into early Globex range. Newsflow light. Low conviction trades dominate."
+    21:00: "Order book thins. Buyers/sellers reposition for Asia."
+    22:00_00:00: "Tokyo opens; light flows emerge. No significant macro drivers."
+    00:00_03:00: "Calm overnight drift. Weather models may shift sentiment."
+    03:00_06:00: "London opens. Volumes pick up. Moves fade into U.S. open."
+    06:00_09:30: "U.S. pre-open positioning. Technical tests, option hedging emerge."
+    09:30_12:00: "Cash open volatility. Direction defined by flows and sentiment."
+    12:00_14:00: "Midday fade or continuation. Spread flow enters."
+    14:00_17:00: "Intraday rebalancing. Stops hit around key levels."
+    17:00: "Settle. Tape quiets ahead of Globex reset."
+
+  day_2_tuesday:
+    18:00: "Reopen continuation. Liquidity remains shallow."
+    19:00_22:00: "Directional flows resume or consolidation holds. Choppy if no news."
+    00:00_06:00: "Overnight traders fade extremes. Asia passive."
+    06:00_09:30: "Pre-market tests technicals. EIA chatter begins."
+    09:30_12:00: "Trend moves or snapbacks. Fund activity increases."
+    12:00_14:00: "Spread traders rotate. Tape softens."
+    14:00_17:00: "Flat positioning into Wednesday. Pre-storage positioning builds."
+
+  day_3_wednesday:
+    18:00: "EIA expectations priced in. Model adjustments post-close."
+    19:00_22:00: "Position build begins. IV rises. Directional bias starts forming."
+    00:00_06:00: "Calm drift. Weather updates influence slow flow."
+    06:00_09:30: "Desk notes circulate. Gamma hedging begins."
+    09:30_12:00: "Funds probe trend continuation. Price tests key zones."
+    12:00_14:00: "Fade or hold. Prep for Thursday EIA."
+    14:00_17:00: "Options flow dominates. Spreads rebalance."
+
+  day_4_thursday_eia:
+    18:00 (prior): "Speculators place directional bets. Some front-run the EIA print."
+    09:30_10:30: "Pre-EIA move builds. Illiquid book leads to potential whip."
+    10:30: "**EIA release.** Instant reaction, 2–5¢ spikes possible within seconds."
+    11:00: "Continuation or mean-reversion depending on print quality."
+    12:00_14:00: "Price stabilizes. Fair-value recalibration begins."
+    14:00_17:00: "Settlement zone battle. Options re-hedged."
+
+  day_5_friday:
+    18:00 (prior): "Thin tape. Clean-up trades executed."
+    00:00_06:00: "Asia watches LNG tracking and risk sentiment."
+    06:00_09:30: "Final push for the week. Spreads active."
+    09:30_12:00: "Risk-on/off behavior. Cash desks flatten books."
+    12:00_14:00: "Fade moves without catalyst. Low conviction."
+    14:00_17:00: "Weekend squaring. Thin tape. Vol collapse."
+
+  day_6_sunday_monday_reopen:
+    18:00: "CME reopens. Gap risk on GFS/ECMWF model surprises."
+    19:00_22:00: "If models flip, expect 3–7¢ gaps. Funds respond fast."
+    00:00_06:00: "Flat unless news breaks. Asia opens calm."
+    06:00_09:30: "Volume builds. Day 1 pattern repeats. Early momentum reestablishes."
