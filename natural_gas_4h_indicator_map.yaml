@@ -1,0 +1,180 @@
+natural_gas_4h_indicator_map:
+  market_phases:
+    trending:
+      indicators:
+        - name: ADX/DMI
+          settings: ADX(14)
+          role: trend_strength
+        - name: Vortex
+          settings: VTX(14)
+          role: trend_strength
+        - name: EMA
+          settings: EMA(21), EMA(50)
+          role: trend_direction
+        - name: Hull Moving Average
+          settings: HMA(21)
+          role: trend_direction
+        - name: Parabolic SAR
+          settings: default
+          role: trend_follow
+        - name: Ichimoku Clouds
+          settings: default
+          role: trend_structure
+    ranging:
+      indicators:
+        - name: RSI
+          settings: RSI(14)
+          role: range_detection
+        - name: Stochastic Oscillator
+          settings: default
+          role: overbought_oversold
+        - name: Choppiness Index
+          settings: default
+          role: range_confirmation
+        - name: Keltner Channel
+          settings: default
+          role: volatility_channel
+        - name: Bollinger Bands
+          settings: BB(20,2)
+          role: mean_reversion
+    consolidating:
+      indicators:
+        - name: Bollinger Band Width
+          settings: default
+          role: contraction_detector
+        - name: OBV
+          settings: default
+          role: volume_consolidation
+        - name: Accumulation/Distribution
+          settings: default
+          role: silent_flow
+        - name: VWMA
+          settings: default
+          role: consolidation_baseline
+        - name: Donchian Channels
+          settings: default
+          role: boundary_detection
+    volatile:
+      indicators:
+        - name: ATR
+          settings: ATR(14)
+          role: volatility
+        - name: Chaikin Volatility
+          settings: default
+          role: volatility_spike
+        - name: Standard Deviation Channel
+          settings: default
+          role: deviation_alert
+        - name: Bollinger Bands
+          settings: BB(20,2)
+          role: range_expansion
+    expanding_contracting:
+      indicators:
+        - name: Donchian Channel Width
+          settings: default
+          role: expansion_detection
+        - name: Envelope
+          settings: default
+          role: range_envelope
+        - name: Ichimoku Clouds
+          settings: default
+          role: trend_phase
+    breakout:
+      indicators:
+        - name: TTM Squeeze
+          settings: default
+          role: breakout_signal
+        - name: Donchian Channels
+          settings: default
+          role: breakout_boundary
+        - name: Volume Oscillator
+          settings: default
+          role: volume_surge
+        - name: Awesome Oscillator
+          settings: default
+          role: impulse_confirmation
+        - name: Momentum
+          settings: default
+          role: acceleration
+    reversing:
+      indicators:
+        - name: RSI
+          settings: RSI(14)
+          role: overbought_oversold
+        - name: Fisher Transform
+          settings: default
+          role: reversal_edge
+        - name: MACD Divergence
+          settings: default
+          role: divergence_signal
+        - name: Williams %R
+          settings: default
+          role: swing_extreme
+        - name: Chande Momentum Oscillator
+          settings: default
+          role: reversal_signal
+    choppy:
+      indicators:
+        - name: Choppiness Index
+          settings: >60
+          role: chop_detection
+        - name: CMF
+          settings: default
+          role: volume_conflict
+        - name: Bollinger Bands
+          settings: BB(20,2)
+          role: squeeze_detection
+        - name: RSI
+          settings: RSI(14)
+          role: chop_zone_flag
+        - name: Volume Oscillator
+          settings: default
+          role: dead_volume
+
+  core_template:
+    indicators:
+      - ADX/DMI
+      - Vortex
+      - RSI
+      - Fisher Transform
+      - Hull Moving Average
+      - TTM Squeeze
+      - Bollinger Bands
+      - OBV
+      - CMF
+    time_frame: 4h
+    asset: Natural Gas Futures (NG)
+
+  market_phase_logic:
+    contraction:
+      triggers:
+        - low BB Width
+        - ATR falling
+        - Choppiness Index > 60
+    expansion:
+      triggers:
+        - rising BB Width or Donchian Width
+        - rising ATR
+    trending:
+      triggers:
+        - Vortex VI+ > VI–
+        - ADX > 25
+        - EMA(21) > EMA(50)
+        - OBV rising
+    distribution:
+      triggers:
+        - RSI > 70
+        - OBV flattening
+        - Fisher bending
+        - Vortex VI+ flattening
+    reversal:
+      triggers:
+        - RSI divergence
+        - Vortex cross
+        - CMF drop
+    choppy:
+      triggers:
+        - ADX < 15
+        - Vortex hugging
+        - BB inside Keltner
+        - volume drop-off
